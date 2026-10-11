@@ -169,6 +169,17 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                 addSharedIndexedDrawCommands(batch, pMeshData, slices);
             }
         }
+
+        // On the non-translucent path every command reads the global shared quad index buffer (a
+        // monotonic pattern), so contiguous sub-draws can be folded into fewer draw calls. This
+        // must run before render() calls ensureCapacity(getIndexBufferSize()), since a merged
+        // command reports a larger element count and the template has to cover it.
+        //
+        // This is intentionally skipped for indexed (translucent) tessellation, where commands may
+        // point at per-section sorted index buffers that aren't a shared monotonic pattern.
+        if (!useIndexedTessellation) {
+            batch.mergeContiguousCommands();
+        }
     }
 
     /**
