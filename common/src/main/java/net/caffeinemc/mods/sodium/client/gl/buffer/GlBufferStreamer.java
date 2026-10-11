@@ -22,10 +22,12 @@ public class GlBufferStreamer {
         this.stride = stride;
 
         if (SodiumClientMod.options().advanced.useAdvancedStagingBuffers && MappedStagingBuffer.isSupported(RenderDevice.INSTANCE) && (GL.getCapabilities().GL_ARB_shader_image_load_store && GL.getCapabilities().glMemoryBarrier != 0L)) {
-            this.buffer = commands.createImmutableBuffer(bufferSize, EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.MAP_WRITE));
+            // COHERENT: modo mais rapido medido na GE8320 (flush vira no-op no MobileGlues,
+            // pula o driver-call). CLIENT_STORAGE omitido -- causava penalty de alocacao.
+            this.buffer = commands.createImmutableBuffer(bufferSize, EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.COHERENT, GlBufferStorageFlags.MAP_WRITE));
 
             this.mapping = commands.mapBuffer(this.buffer, 0, bufferSize,
-                    EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH));
+                    EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.COHERENT, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH));
             this.writeAddress = MemoryUtil.memAddress(this.mapping.getMemoryBuffer());
         } else {
             this.buffer = commands.createMutableBuffer();
