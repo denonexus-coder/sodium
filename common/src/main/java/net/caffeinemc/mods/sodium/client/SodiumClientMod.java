@@ -8,6 +8,7 @@ import net.caffeinemc.mods.sodium.client.data.fingerprint.HashedFingerprint;
 import net.caffeinemc.mods.sodium.client.gui.SodiumDebugEntry;
 import net.caffeinemc.mods.sodium.client.gui.SodiumOptions;
 import net.caffeinemc.mods.sodium.client.services.PlatformRuntimeInformation;
+import net.caffeinemc.mods.sodium.client.util.MgCorePin;
 import net.caffeinemc.mods.sodium.mixin.features.gui.hooks.debug.DebugScreenEntriesAccessor;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -27,6 +28,15 @@ public class SodiumClientMod {
         var entries = DebugScreenEntriesAccessor.getEntries();
         entries.put(SODIUM_DEBUG_ENTRY_FULL, new SodiumDebugEntry(true));
         entries.put(SODIUM_DEBUG_ENTRY_REDUCED, new SodiumDebugEntry(false));
+
+        // Este entrypoint roda na render thread. Fixa-la no big core cpu3 (o layout
+        // 3+1 medido neste aparelho: cpu0-3 rapidos, cpu4-7 livres) tira o render do
+        // scheduler e reduz jitter de frame time. No-op se a ponte nativa não carregar.
+        if (MgCorePin.isAvailable()) {
+            int rc = MgCorePin.pinCurrentToCpu(MgCorePin.RENDER_CPU);
+            LOGGER.info("Render thread pinned to cpu{} (rc={}, now on cpu{})",
+                    MgCorePin.RENDER_CPU, rc, MgCorePin.currentCpu());
+        }
 
         MOD_VERSION = version;
 

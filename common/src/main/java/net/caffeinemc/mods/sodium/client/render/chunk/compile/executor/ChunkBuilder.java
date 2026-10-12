@@ -7,6 +7,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.compile.BuilderTaskOutput;
 import net.caffeinemc.mods.sodium.client.render.chunk.compile.ChunkBuildContext;
 import net.caffeinemc.mods.sodium.client.render.chunk.compile.tasks.ChunkBuilderTask;
 import net.caffeinemc.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
+import net.caffeinemc.mods.sodium.client.util.MgCorePin;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.util.Mth;
@@ -30,9 +31,20 @@ public class ChunkBuilder {
     public ChunkBuilder(ClientLevel level, ChunkVertexType vertexType) {
         int count = getThreadCount();
 
+        // Layout 3+1 medido neste aparelho: render thread -> cpu3, chunk workers ->
+        // cpu0-2 (os big cores, 2.3GHz), cpu4-7 livres. Se a ponte nativa de afinidade
+        // carregou, limitamos aos 3 núcleos grandes e cada worker fixa o seu no boot.
+        final boolean pinning = MgCorePin.isAvailable();
+        final int[] pinCpus = MgCorePin.CHUNK_CPUS;
+        if (pinning && count > pinCpus.length) {
+            LOGGER.info("Capping chunk builder threads from {} to {} (big cores)", count, pinCpus.length);
+            count = pinCpus.length;
+        }
+
         for (int i = 0; i < count; i++) {
             ChunkBuildContext context = new ChunkBuildContext(level, vertexType);
-            WorkerRunnable worker = new WorkerRunnable("Chunk Render Task Executor #" + i, context);
+            final int pinnedCpu = (pinning && i < pinCpus.length) ? pinCpus[i] : -1;
+            WorkerRunnable worker = new WorkerRunnable("Chunk Render Task Executor #" + i, context, pinnedCpu);
 
             Thread thread = new Thread(worker, "Chunk Render Task Executor #" + i);
             thread.setPriority(Math.max(0, Thread.NORM_PRIORITY - 2));
@@ -161,14 +173,25 @@ public class ChunkBuilder {
         // caches between different CPU cores
         private final String name;
         private final ChunkBuildContext context;
+        private final int pinnedCpu;
 
-        public WorkerRunnable(String name, ChunkBuildContext context) {
+        public WorkerRunnable(String name, ChunkBuildContext context, int pinnedCpu) {
             this.name = name;
             this.context = context;
+            this.pinnedCpu = pinnedCpu;
         }
 
         @Override
         public void run() {
+            // Fixa esta thread ao big core designado (cpu0-2). Roda UMA vez no boot do
+            // worker; custo ~1.3us (syscall), irrelevante. No-op se pinnedCpu < 0.
+            if (this.pinnedCpu >= 0) {
+                int rc = MgCorePin.pinCurrentToCpu(this.pinnedCpu);
+                if (rc != 0) {
+                    LOGGER.warn("Could not pin {} to cpu{} (rc={})", this.name, this.pinnedCpu, rc);
+                }
+            }
+
             // Run until the chunk builder shuts down
             while (ChunkBuilder.this.queue.isRunning()) {
                 ChunkJob job;
