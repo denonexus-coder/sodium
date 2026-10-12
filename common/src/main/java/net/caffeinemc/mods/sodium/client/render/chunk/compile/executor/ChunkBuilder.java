@@ -127,7 +127,16 @@ public class ChunkBuilder {
 
     private static int getThreadCount() {
         int requested = SodiumClientMod.options().performance.chunkBuilderThreads;
-        return requested == 0 ? getOptimalThreadCount() : Math.min(requested, getMaxThreadCount());
+        if (requested != 0) {
+            return Math.min(requested, getMaxThreadCount());
+        }
+        // Com pinning ativo, o AUTO vira o nº de big cores dedicados aos workers (3),
+        // em vez de getOptimalThreadCount(). Neste aparelho de 8 cores aquele dá 2
+        // (max(8/3, 8-6)), o que deixaria o cpu2 ocioso e quebraria o layout 3+1.
+        if (MgCorePin.isAvailable()) {
+            return MgCorePin.CHUNK_CPUS.length;
+        }
+        return getOptimalThreadCount();
     }
 
     private static int getMaxThreadCount() {
