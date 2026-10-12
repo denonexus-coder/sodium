@@ -23,10 +23,12 @@ public final class MgCorePin {
     // Chunk workers nos big cores cpu0-2.
     public static final int[] CHUNK_CPUS = {0, 1, 2};
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("MgCorePin");
     private static final boolean AVAILABLE;
 
     static {
         boolean ok = false;
+        String reason = "not-arm64-or-non-linux";
         try {
             String os = System.getProperty("os.name", "").toLowerCase();
             String arch = System.getProperty("os.arch", "").toLowerCase();
@@ -41,13 +43,49 @@ public final class MgCorePin {
                         Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
                         System.load(tmp.toAbsolutePath().toString());
                         ok = true;
+                        reason = null;
+                    } else {
+                        reason = "resource-missing:" + res;
                     }
                 }
             }
         } catch (Throwable t) {
             ok = false; // degrada para no-op em vez de propagar
+            reason = t.getClass().getSimpleName() + ": " + t.getMessage();
         }
         AVAILABLE = ok;
+
+        // Log de carregamento/intercepção da lib — pedido pelo usuário.
+        if (ok) {
+            LOGGER.info("MgCorePin: lib interceptada e carregada (layout 3+1: render->cpu{}, workers->cpu0-2, cpu4-7 livres; cpus={})",
+                    RENDER_CPU, nativeCpuCountSafe());
+        } else {
+            LOGGER.warn("MgCorePin: lib NAO carregada ({}); pinning desativado, Sodium opera normalmente", reason);
+        }
+    }
+
+    private static int nativeCpuCountSafe() {
+        try {
+            return nativeCpuCount();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * Linha para o overlay F3 indicando o estado do pinning. Devolve {@code null}
+     * quando o pinning está OFF (para não poluir o overlay); quando ON, mostra o
+     * núcleo em que a render thread ESTÁ agora (chamado na própria render thread,
+     * então {@link #currentCpu()} é prova ao vivo).
+     */
+    public static String overlayStatusLine() {
+        if (!AVAILABLE) {
+            return null;
+        }
+        int live = currentCpu();
+        String livePart = (live >= 0 && live != RENDER_CPU) ? " LIVE=cpu" + live + "!" : "=cpu" + live;
+        return String.format("Core Pin: ON  render=%s  workers=cpu%d,%d,%d  free=cpu4-7",
+                "cpu" + RENDER_CPU + livePart, CHUNK_CPUS[0], CHUNK_CPUS[1], CHUNK_CPUS[2]);
     }
 
     private MgCorePin() {}

@@ -2,6 +2,7 @@ package net.caffeinemc.mods.sodium.client.gui;
 
 import net.caffeinemc.mods.sodium.client.SodiumClientMod;
 import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer;
+import net.caffeinemc.mods.sodium.client.util.MgCorePin;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.debug.DebugScreenDisplayer;
 import net.minecraft.client.gui.components.debug.DebugScreenEntry;
@@ -36,6 +37,12 @@ public class SodiumDebugEntry implements DebugScreenEntry {
     @Override
     public void display(DebugScreenDisplayer debugScreenDisplayer, @Nullable Level level, @Nullable LevelChunk levelChunk, @Nullable LevelChunk levelChunk2) {
         debugScreenDisplayer.addToGroup(DEBUG_GROUP, "%sSodium Renderer (%s)".formatted(getVersionColor(), SodiumClientMod.getVersion()));
+
+        // Estado do pinning de núcleos (3+1). null quando OFF -> não mostra nada.
+        String corePin = MgCorePin.overlayStatusLine();
+        if (corePin != null) {
+            debugScreenDisplayer.addToGroup(DEBUG_GROUP, "%s%s".formatted(ChatFormatting.AQUA, corePin));
+        }
 
         var renderer = SodiumWorldRenderer.instanceNullable();
 
