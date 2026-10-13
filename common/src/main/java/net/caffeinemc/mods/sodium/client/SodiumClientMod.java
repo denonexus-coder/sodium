@@ -29,13 +29,17 @@ public class SodiumClientMod {
         entries.put(SODIUM_DEBUG_ENTRY_FULL, new SodiumDebugEntry(true));
         entries.put(SODIUM_DEBUG_ENTRY_REDUCED, new SodiumDebugEntry(false));
 
-        // Este entrypoint roda na render thread. Fixa-la no big core cpu3 (o layout
-        // 3+1 medido neste aparelho: cpu0-3 rapidos, cpu4-7 livres) tira o render do
-        // scheduler e reduz jitter de frame time. No-op se a ponte nativa não carregar.
-        if (MgCorePin.isAvailable()) {
+        // Fase 1 — SÓ fixa a render thread no modo "full" (antigo 3+1, que derrubou o jogo
+        // para 1/4/10 fps). No modo "workers" (PADRÃO) a render thread fica DESpinada para
+        // que o scheduler a coloque num big core livre (cpu2-3), deixando headroom para GC,
+        // JIT e driver — era a falta disso que travava tudo. No-op se a ponte não carregar.
+        if (MgCorePin.pinRender()) {
             int rc = MgCorePin.pinCurrentToCpu(MgCorePin.RENDER_CPU);
             LOGGER.info("Render thread pinned to cpu{} (rc={}, now on cpu{})",
                     MgCorePin.RENDER_CPU, rc, MgCorePin.currentCpu());
+        } else {
+            LOGGER.info("MgCorePin modo={} — render thread NAO fixada (livre p/ scheduler); workers fixos em {} cpus",
+                    MgCorePin.MODE, MgCorePin.CHUNK_CPUS.length);
         }
 
         MOD_VERSION = version;

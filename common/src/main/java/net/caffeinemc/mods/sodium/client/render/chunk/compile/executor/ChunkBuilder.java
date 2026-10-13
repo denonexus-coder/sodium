@@ -32,12 +32,14 @@ public class ChunkBuilder {
         int count = getThreadCount();
 
         // Layout 3+1 medido neste aparelho: render thread -> cpu3, chunk workers ->
-        // cpu0-2 (os big cores, 2.3GHz), cpu4-7 livres. Se a ponte nativa de afinidade
-        // carregou, limitamos aos 3 núcleos grandes e cada worker fixa o seu no boot.
-        final boolean pinning = MgCorePin.isAvailable();
+        // Fase 1 (layout corrigido): em modo "workers" (padrão) os workers ficam nos
+        // big cores cpu0-1 e a render thread fica DESpinada (scheduler escolhe um big
+        // livre). cpu2-3 + os LITTLE cpu4-7 ficam livres para GC/JIT/driver/Android.
+        // Em modo "off" não há pin nenhum. Em "full" é o 3+1 antigo (só p/ A/B).
+        final boolean pinning = MgCorePin.workersPinned();
         final int[] pinCpus = MgCorePin.CHUNK_CPUS;
         if (pinning && count > pinCpus.length) {
-            LOGGER.info("Capping chunk builder threads from {} to {} (big cores)", count, pinCpus.length);
+            LOGGER.info("Capping chunk builder threads from {} to {} (mode={})", count, pinCpus.length, MgCorePin.MODE);
             count = pinCpus.length;
         }
 
@@ -130,11 +132,12 @@ public class ChunkBuilder {
         if (requested != 0) {
             return Math.min(requested, getMaxThreadCount());
         }
-        // Com pinning ativo, o AUTO vira o nº de big cores dedicados aos workers (3),
-        // em vez de getOptimalThreadCount(). Neste aparelho de 8 cores aquele dá 2
-        // (max(8/3, 8-6)), o que deixaria o cpu2 ocioso e quebraria o layout 3+1.
-        if (MgCorePin.isAvailable()) {
-            return MgCorePin.CHUNK_CPUS.length;
+        // Com workers fixados (modo workers/full), o AUTO vira o nº de big cores dedicados
+        // aos workers (2 no padrão) em vez de getOptimalThreadCount(). Em modo "off" cai
+        // no cálculo normal. O importante: nunca ocupar TODOS os big cores — deixar 1+ livre
+        // para GC/JIT/driver (foi isso que matou o 3+1 antigo: GC sem big core → 1 fps).
+        if (MgCorePin.workersPinned()) {
+            return Math.max(MgCorePin.CHUNK_CPUS.length, 1);
         }
         return getOptimalThreadCount();
     }
