@@ -15,11 +15,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MappedStagingBuffer implements StagingBuffer {
+    // Fastest buffer-storage mode on PowerVR Rogue GE8320 (measured by the mg_bs_modes bench
+    // against libmobileglues, on this exact Sodium staging workload): COHERENT + CLIENT_STORAGE
+    // off. A coherent mapping makes flushMappedRange a no-op in the MobileGlues layer (skipping
+    // the driver-call), while CLIENT_STORAGE costs an allocation penalty on this TBDR. Median
+    // 0.255ms vs 0.310ms for EXPLICIT_FLUSH+auto. EXPLICIT_FLUSH is kept so the unconditional
+    // glFlushMappedBufferRange in GLRenderDevice stays a legal call.
     private static final EnumBitField<GlBufferStorageFlags> STORAGE_FLAGS =
-            EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.CLIENT_STORAGE, GlBufferStorageFlags.MAP_WRITE);
+            EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.COHERENT, GlBufferStorageFlags.MAP_WRITE);
 
     private static final EnumBitField<GlBufferMapFlags> MAP_FLAGS =
-            EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.INVALIDATE_BUFFER, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH);
+            EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.COHERENT, GlBufferMapFlags.INVALIDATE_BUFFER, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH);
 
     private final FallbackStagingBuffer fallbackStagingBuffer;
 

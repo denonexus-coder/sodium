@@ -147,6 +147,12 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                 addDrawCommands(batch, pMeshData, slices);
             }
         }
+
+        // Every command in this batch reads the single shared quad index buffer (a monotonic
+        // pattern), so contiguous sub-draws can be folded into fewer draw calls. This must run
+        // before render() calls ensureCapacity(getIndexBufferSize()), since a merged command
+        // reports a larger element count and the template has to cover it.
+        batch.mergeContiguousCommands();
     }
 
     @SuppressWarnings("IntegerMultiplicationImplicitCastToLong")
