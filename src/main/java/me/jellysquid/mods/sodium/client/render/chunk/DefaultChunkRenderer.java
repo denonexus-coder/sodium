@@ -23,6 +23,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkMeshAttr
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
 import me.jellysquid.mods.sodium.client.util.BitwiseMath;
+import org.lwjgl.opengl.GL11C;
 import org.lwjgl.system.MemoryUtil;
 
 import java.util.Iterator;
@@ -49,6 +50,16 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
         boolean useBlockFaceCulling = SodiumClientMod.options().performance.useBlockFaceCulling;
 
+        // Widening the visible faces to a contiguous run (see expandToGeometryRun) puts
+        // back-facing triangles back into the batch on the strength of GL discarding them, so
+        // whether it is safe at all comes down to one fact: is face culling actually enabled for
+        // this pass. Read it from the driver rather than assume it -- pass.startDrawing() above
+        // has just applied whatever the layer asks for, and layers are free to differ. When it is
+        // off, the plain plane test below runs exactly as it always did and nothing is submitted
+        // that was not submitted before. One query per render pass against thousands of sub-draws
+        // is not a measurable cost, and the state is answered locally from the state object.
+        boolean cullFaceEnabled = GL11C.glIsEnabled(GL11C.GL_CULL_FACE);
+
         ChunkShaderInterface shader = this.activeProgram.getInterface();
         shader.setProjectionMatrix(matrices.projection());
         shader.setModelViewMatrix(matrices.modelView());
@@ -65,7 +76,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                 continue;
             }
 
-            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling);
+            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, cullFaceEnabled);
 
             if (this.batch.isEmpty()) {
                 continue;
@@ -88,7 +99,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                           ChunkRenderList renderList,
                                           CameraTransform camera,
                                           TerrainRenderPass pass,
-                                          boolean useBlockFaceCulling) {
+                                          boolean useBlockFaceCulling,
+                                          boolean cullFaceEnabled) {
         batch.clear();
 
         var iterator = renderList.sectionsWithGeometryIterator(pass.isReverseOrder());
@@ -110,15 +122,26 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
             var pMeshData = renderDataStorage.getDataPointer(sectionIndex);
 
+            final int geometryMask = SectionRenderDataUnsafe.getSliceMask(pMeshData);
+
             int slices;
 
-            if (useBlockFaceCulling) {
-                slices = getVisibleFaces(camera.intX, camera.intY, camera.intZ, chunkX, chunkY, chunkZ);
-            } else {
+            if (!useBlockFaceCulling) {
                 slices = ModelQuadFacing.ALL;
+            } else {
+                final int visible = getVisibleFaces(camera.intX, camera.intY, camera.intZ, chunkX, chunkY, chunkZ);
+
+                if (cullFaceEnabled) {
+                    // Merge-aware: one contiguous run per section, folded to one draw below.
+                    slices = expandToGeometryRun(visible, geometryMask);
+                } else {
+                    // Without a cull in the driver the plane test is the only thing keeping back
+                    // faces off screen, so widen nothing: exactly what was always submitted.
+                    slices = visible;
+                }
             }
 
-            slices &= SectionRenderDataUnsafe.getSliceMask(pMeshData);
+            slices &= geometryMask;
 
             if (slices != 0) {
                 addDrawCommands(batch, pMeshData, slices);
@@ -193,6 +216,39 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         planes |=    BitwiseMath.lessThan(originZ, (boundsMaxZ + 3)) << MODEL_NEG_Z;
 
         return planes;
+    }
+
+    // Widens the camera-visible faces to every geometry face lying between the first and the last
+    // of them, so that a section is submitted as one contiguous run of its vertex buffer.
+    //
+    // A section packs its faces back-to-back (SectionRenderDataStorage advances vertexOffset by
+    // vertexCount, which is zero for a face with no geometry, so only faces that actually hold
+    // geometry ever open a gap). Dropping a face *between* two kept ones therefore splits the
+    // section's vertex range in two, and MultiDrawBatch.mergeContiguousCommands() can no longer
+    // fold them: `inBaseVertex == outBaseVertex + outVertexSpan` fails across the gap, each run
+    // stays its own command, and each command costs a separate glDrawElementsBaseVertex on the
+    // driver -- on the PowerVR parts this targets, by far the most expensive thing the frame does.
+    //
+    // Filling the span submits only faces that sit between two visible ones. The triangles the
+    // camera would see anyway are submitted exactly as before; the added ones are back-facing --
+    // that is precisely why the plane test rejected them -- so GL's own cull discards them and the
+    // pixels are unchanged. What it buys is that the emitted faces are contiguous, so the fold
+    // above reduces the whole section to a single draw call.
+    //
+    // Only called when useBlockFaceCulling is on; with it off, slices is already ModelQuadFacing.ALL.
+    private static int expandToGeometryRun(int visible, int geometryMask) {
+        visible &= geometryMask;
+
+        // Zero has no span to fill, and a lone face is contiguous by construction.
+        if ((visible & (visible - 1)) == 0) {
+            return visible;
+        }
+
+        final int lo = Integer.numberOfTrailingZeros(visible);
+        final int hi = Integer.SIZE - 1 - Integer.numberOfLeadingZeros(visible);
+        final int span = ((1 << (hi - lo + 1)) - 1) << lo;
+
+        return visible | (geometryMask & span);
     }
 
     private static void setModelMatrixUniforms(ChunkShaderInterface shader, RenderRegion region, CameraTransform camera) {
