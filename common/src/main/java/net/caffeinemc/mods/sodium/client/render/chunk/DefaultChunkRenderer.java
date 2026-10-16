@@ -24,6 +24,7 @@ import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform;
 import net.caffeinemc.mods.sodium.client.util.BitwiseMath;
 import net.caffeinemc.mods.sodium.client.util.FogParameters;
 import net.caffeinemc.mods.sodium.client.util.UInt32;
+import org.lwjgl.opengl.GL11C;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.Pointer;
 
@@ -57,6 +58,17 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         final boolean useBlockFaceCulling = SodiumClientMod.options().performance.useBlockFaceCulling;
         final boolean useIndexedTessellation = renderPass.isTranslucent() && indexedRenderingEnabled;
 
+        // Widening the visible faces to a contiguous run (see expandToGeometryRun) puts
+        // back-facing triangles back into the batch on the strength of GL discarding them, so
+        // whether it is safe at all comes down to one fact: is face culling actually enabled for
+        // this pass. Read it from the driver rather than assume it -- super.begin() above has just
+        // applied the pass's pipeline state, and pipelines are free to differ on culling. When it
+        // is off, the plain plane test below runs exactly as it always did and nothing is
+        // submitted that was not submitted before. One query per render pass against thousands of
+        // sub-draws is not a measurable cost, and the state is answered locally from the state
+        // object.
+        final boolean cullFaceEnabled = GL11C.glIsEnabled(GL11C.GL_CULL_FACE);
+
         ChunkShaderInterface shader = this.activeProgram.getInterface();
         shader.setProjectionMatrix(matrices.projection());
         shader.setModelViewMatrix(matrices.modelView());
@@ -75,7 +87,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
             var batch = region.getCachedBatch(renderPass);
             if (!batch.isFilled) {
-                fillCommandBuffer(batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, useIndexedTessellation);
+                fillCommandBuffer(batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, useIndexedTessellation, cullFaceEnabled);
             }
 
             if (batch.isEmpty()) {
@@ -110,7 +122,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                           CameraTransform camera,
                                           TerrainRenderPass pass,
                                           boolean useBlockFaceCulling,
-                                          boolean useIndexedTessellation) {
+                                          boolean useIndexedTessellation,
+                                          boolean cullFaceEnabled) {
         batch.isFilled = true;
 
         var iterator = renderList.sectionsWithGeometryIterator(pass.isTranslucent());
@@ -133,17 +146,35 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             int chunkY = originY + LocalSectionIndex.unpackY(sectionIndex);
             int chunkZ = originZ + LocalSectionIndex.unpackZ(sectionIndex);
 
+            // Which generator will consume these faces. Only the shared-index generator combines
+            // neighbouring faces into one command; the local one reads per-section sorted index
+            // buffers, where combining is impossible (see the note below). Widening the mask is
+            // only worth the extra triangles where a wider mask becomes a shorter command list.
+            final boolean sharedGenerator = !(useIndexedTessellation && SectionRenderDataUnsafe.isLocalIndex(pMeshData));
+
+            final int geometryMask = SectionRenderDataUnsafe.getSliceMask(pMeshData);
+
             // The bit field of "visible" geometry sets which should be rendered
             int slices;
 
-            if (useBlockFaceCulling) {
-                slices = getVisibleFaces(camera.intX, camera.intY, camera.intZ, chunkX, chunkY, chunkZ);
-            } else {
+            if (!useBlockFaceCulling) {
                 slices = ModelQuadFacing.ALL;
+            } else {
+                final int visible = getVisibleFaces(camera.intX, camera.intY, camera.intZ, chunkX, chunkY, chunkZ);
+
+                if (cullFaceEnabled && sharedGenerator) {
+                    // Merge-aware: one contiguous run of slots per section, one command below.
+                    slices = expandToGeometryRun(pMeshData, visible);
+                } else {
+                    // Either the driver has no cull -- so the plane test is the only thing keeping
+                    // back faces off screen -- or combining is impossible anyway. Widen nothing:
+                    // exactly what was always submitted.
+                    slices = visible;
+                }
             }
 
             // Mask off any geometry sets which are empty (contain no geometry)
-            slices &= SectionRenderDataUnsafe.getSliceMask(pMeshData);
+            slices &= geometryMask;
 
             // If there are no geometry sets to render, don't try to build a draw command buffer for this section
             if (slices == 0) {
@@ -157,10 +188,10 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             // of the elements needs to start at 0 and thus starting somewhere further into the shared index buffer is invalid.
             // there's also the optimization that draw commands can be combined when using a shared index buffer, be it
             // globally shared or just shared within the region, which isn't possible with the locally-indexed command generator.
-            if (useIndexedTessellation && SectionRenderDataUnsafe.isLocalIndex(pMeshData)) {
-                addLocalIndexedDrawCommands(batch, pMeshData, slices);
-            } else {
+            if (sharedGenerator) {
                 addSharedIndexedDrawCommands(batch, pMeshData, slices);
+            } else {
+                addLocalIndexedDrawCommands(batch, pMeshData, slices);
             }
         }
 
@@ -316,6 +347,60 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         planes |=    BitwiseMath.lessThan(originZ, (boundsMaxZ + 3)) << MODEL_NEG_Z;
 
         return planes;
+    }
+
+    // Widens the camera-visible faces to every geometry-bearing face lying between the first and
+    // the last visible one, *in vertex-buffer order*, so a section is submitted as one contiguous
+    // run and addSharedIndexedDrawCommands() emits it as a single command.
+    //
+    // A section packs its slots back-to-back (setVertexData records a base vertex and then a run of
+    // per-slot vertex counts), so only a slot that actually holds geometry can open a gap. Dropping
+    // a slot *between* two kept ones splits the section's vertex range in two, the mask stops being
+    // one contiguous run of slots, and the generator is forced to write two commands where one
+    // would do -- each a separate glDrawElementsBaseVertex, which on the PowerVR parts this targets
+    // is by far the most expensive thing a frame does.
+    //
+    // The span is taken over slots rather than over ModelQuadFacing ordinals on purpose: the slot
+    // order is whatever the builder produced and is read back through getFacingList(), so ordinal
+    // contiguity would not imply contiguity of the vertices. Slots with no geometry are skipped,
+    // and the enclosing slices &= getSliceMask() drops them from the result anyway.
+    //
+    // The faces it adds are back-facing -- that is precisely why the plane test rejected them -- so
+    // GL's own cull discards them and the pixels are unchanged. What it buys is a shorter command
+    // list on the shared-index path, which is the only path where combining is possible at all.
+    private static int expandToGeometryRun(long pMeshData, int visible) {
+        final long facingList = SectionRenderDataUnsafe.getFacingList(pMeshData);
+
+        int first = -1, last = -1;
+
+        for (int i = 0; i < ModelQuadFacing.COUNT; i++) {
+            if (SectionRenderDataUnsafe.getVertexCount(pMeshData, i) == 0) {
+                continue;
+            }
+
+            final int facing = (int) ((facingList >>> (i * 8)) & 0xFF);
+
+            if (((visible >>> facing) & 1) != 0) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+
+        if (first < 0) {
+            return 0;   // nothing visible: no span to fill
+        }
+
+        int result = visible;
+
+        for (int i = first; i <= last; i++) {
+            if (SectionRenderDataUnsafe.getVertexCount(pMeshData, i) == 0) {
+                continue;
+            }
+
+            result |= (1 << ((int) ((facingList >>> (i * 8)) & 0xFF)));
+        }
+
+        return result;
     }
 
     private static void setModelMatrixUniforms(ChunkShaderInterface shader, RenderRegion region, CameraTransform camera, GlBuffer chunKData) {
