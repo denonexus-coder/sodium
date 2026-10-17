@@ -25,25 +25,63 @@ import java.nio.file.Path;
  *   <li>how long the CPU spends building the command list versus handing it to the driver.</li>
  * </ul>
  *
- * <p>Off unless {@code -Dsodium.trace} is set. When it is off every entry point below is guarded by
- * a {@code static final boolean} the JIT folds away, counters are never touched and nothing is
- * allocated, so a game build carries the class but not the cost.
+ * <p>Off by default, and switched from inside the game: <b>Sodium options -> Advanced -> Frame
+ * Trace</b>. That writes {@code sodium-trace.csv} in the game directory and logs a summary line
+ * every window. Nothing here is a launcher flag or a JVM property -- the setting persists in
+ * {@code sodium-options.json} like any other Sodium option.
  *
- * <p>Switches:
+ * <p>When it is off, every entry point below is guarded by a boolean test that is never taken:
+ * no counter is touched, no clock is read and nothing is allocated, so a game build carries the
+ * class but not the cost.
+ *
+ * <p>Advanced options on the same page:
  * <ul>
- *   <li>{@code -Dsodium.trace} -- enable (writes {@code sodium-trace.csv} in the game directory and
- *       logs a summary every window);</li>
- *   <li>{@code -Dsodium.trace.window=N} -- frames per summary/flush, default 300;</li>
- *   <li>{@code -Dsodium.trace.finish} -- bracket every region draw with {@code glFinish} so the
- *       measured draw time is GPU completion and not just submission. This serialises the pipeline
- *       and changes the frame; use it deliberately, never to judge FPS.</li>
+ *   <li><b>Frame Trace</b> -- the switch above;</li>
+ *   <li><b>Frame Trace Window</b> -- frames per CSV flush and per summary line (default 300);</li>
+ *   <li><b>Frame Trace GL Finish</b> -- brackets every region draw with {@code glFinish}, so the
+ *       measured draw time is completion and not just submission. It serialises the pipeline and
+ *       changes the frame: useful to split CPU from GPU once, never to judge FPS.</li>
  * </ul>
+ *
+ * <p>{@code -Dsodium.trace} and {@code -Dsodium.trace.finish} still force the corresponding
+ * switches on, for CI and headless automation. They are escape hatches, not the supported path.
  */
 public final class FrameTrace {
-    public static final boolean ENABLED = Boolean.getBoolean("sodium.trace");
+    /**
+     * {@code -Dsodium.trace} still forces the instrument on, for automation and CI. It is an escape
+     * hatch, not the way in: the real switch is a Sodium option (Advanced page -> "Frame Trace"), so
+     * it can be turned on from inside the game and persists in {@code sodium-options.json}.
+     */
+    private static final boolean FORCED = Boolean.getBoolean("sodium.trace");
 
-    private static final boolean GL_FINISH = Boolean.getBoolean("sodium.trace.finish");
-    private static final int WINDOW = Math.max(1, Integer.getInteger("sodium.trace.window", 300));
+    private static volatile boolean enabled = FORCED;
+    private static volatile int window = 300;
+    private static volatile boolean glFinish = Boolean.getBoolean("sodium.trace.finish");
+
+    /**
+     * Applies the mod's own options. Called once at startup with what was on disk, and again every
+     * time the Advanced page is applied, so the switch takes effect without restarting the game.
+     *
+     * @param optEnabled  the "Frame Trace" tick box
+     * @param optWindow   frames per flush and per summary line
+     * @param optGlFinish the "Frame Trace GL Finish" tick box (serialises the pipeline; see below)
+     */
+    public static void configure(boolean optEnabled, int optWindow, boolean optGlFinish) {
+        final boolean wasEnabled = enabled;
+
+        enabled = optEnabled || FORCED;
+        window = Math.max(1, optWindow);
+        glFinish = optGlFinish || Boolean.getBoolean("sodium.trace.finish");
+
+        // Turning it off mid-session must not cost the rows already buffered.
+        if (wasEnabled && !enabled) {
+            flush();
+        }
+    }
+
+    public static boolean isEnabled() {
+        return enabled;
+    }
 
     // ---- counters ---------------------------------------------------------
     public static final int REGION_VISITED = 0;
@@ -109,47 +147,47 @@ public final class FrameTrace {
     // ---- emit API ---------------------------------------------------------
 
     public static long now() {
-        return ENABLED ? System.nanoTime() : 0L;
+        return enabled ? System.nanoTime() : 0L;
     }
 
     public static void inc(int id) {
-        if (ENABLED) {
+        if (enabled) {
             counters[id]++;
         }
     }
 
     public static void add(int id, long value) {
-        if (ENABLED) {
+        if (enabled) {
             counters[id] += value;
         }
     }
 
     public static void addTime(int id, long startNs) {
-        if (ENABLED) {
+        if (enabled) {
             timers[id] += System.nanoTime() - startNs;
         }
     }
 
     public static void histPreMerge(int size) {
-        if (ENABLED) {
+        if (enabled) {
             histPre[bucket(size)]++;
         }
     }
 
     public static void histPostMerge(int size) {
-        if (ENABLED) {
+        if (enabled) {
             histPost[bucket(size)]++;
         }
     }
 
     public static void beforeRegionDraw() {
-        if (ENABLED && GL_FINISH) {
+        if (enabled && glFinish) {
             GL11C.glFinish();
         }
     }
 
     public static void afterRegionDraw() {
-        if (ENABLED && GL_FINISH) {
+        if (enabled && glFinish) {
             GL11C.glFinish();
         }
     }
@@ -171,7 +209,7 @@ public final class FrameTrace {
      * counters accumulated since the last call are exactly that frame's and are written as one row.
      */
     public static void frameTick() {
-        if (!ENABLED) {
+        if (!enabled) {
             return;
         }
 
@@ -185,7 +223,7 @@ public final class FrameTrace {
         writeRow(period);
         reset();
 
-        if (frames % WINDOW == 0) {
+        if (frames % window == 0) {
             flush();
             logSummary();
         }

@@ -11,6 +11,7 @@ import me.jellysquid.mods.sodium.client.gui.options.control.SliderControl;
 import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
 import me.jellysquid.mods.sodium.client.gui.options.storage.MinecraftOptionsStorage;
 import me.jellysquid.mods.sodium.client.gui.options.storage.SodiumOptionsStorage;
+import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
@@ -344,6 +345,62 @@ public class SodiumGameOptionPages {
                 )
                 .build());
 
+        // Frame Trace: the chunk-draw instrumentation. It is not a performance option -- it measures
+        // so that the performance work can be aimed at something real. Off by default; the switch
+        // and its two knobs live here so it can be turned on from the game instead of from a
+        // launcher's JVM arguments, which is not where a mod's options belong.
+        groups.add(OptionGroup.createBuilder()
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.translatable("sodium.options.frame_trace.name"))
+                        .setTooltip(Text.translatable("sodium.options.frame_trace.tooltip"))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.LOW)
+                        .setBinding(
+                                (opts, value) -> {
+                                    opts.advanced.enableFrameTrace = value;
+                                    applyFrameTrace(opts);
+                                },
+                                opts -> opts.advanced.enableFrameTrace)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(int.class, sodiumOpts)
+                        .setName(Text.translatable("sodium.options.frame_trace_window.name"))
+                        .setTooltip(Text.translatable("sodium.options.frame_trace_window.tooltip"))
+                        .setControl(opt -> new SliderControl(opt, 60, 1200, 60, ControlValueFormatter.number()))
+                        .setImpact(OptionImpact.LOW)
+                        .setBinding(
+                                (opts, value) -> {
+                                    opts.advanced.frameTraceWindow = value;
+                                    applyFrameTrace(opts);
+                                },
+                                opts -> opts.advanced.frameTraceWindow)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.translatable("sodium.options.frame_trace_gl_finish.name"))
+                        .setTooltip(Text.translatable("sodium.options.frame_trace_gl_finish.tooltip"))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.LOW)
+                        .setBinding(
+                                (opts, value) -> {
+                                    opts.advanced.frameTraceGlFinish = value;
+                                    applyFrameTrace(opts);
+                                },
+                                opts -> opts.advanced.frameTraceGlFinish)
+                        .build()
+                )
+                .build());
+
         return new OptionPage(Text.translatable("sodium.options.pages.advanced"), ImmutableList.copyOf(groups));
+    }
+
+    /**
+     * Pushes the three Frame Trace switches into the instrument. Each binding writes its own field
+     * first, so re-reading all three here keeps the others where they were and the change lands
+     * without a restart.
+     */
+    private static void applyFrameTrace(SodiumGameOptions opts) {
+        FrameTrace.configure(opts.advanced.enableFrameTrace, opts.advanced.frameTraceWindow,
+                opts.advanced.frameTraceGlFinish);
     }
 }

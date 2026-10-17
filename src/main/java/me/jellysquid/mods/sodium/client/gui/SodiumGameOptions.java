@@ -6,6 +6,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 import me.jellysquid.mods.sodium.client.gui.options.TextProvider;
 import me.jellysquid.mods.sodium.client.util.FileUtil;
+import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.option.GraphicsMode;
 import net.minecraft.text.Text;
@@ -52,6 +53,12 @@ public class SodiumGameOptions {
         public boolean useAdvancedStagingBuffers = true;
 
         public int cpuRenderAheadLimit = 3;
+
+        // Frame Trace: the chunk-draw instrumentation (see util/FrameTrace). Off by default and
+        // costless when off; it exists to be turned on deliberately, from the Advanced page.
+        public boolean enableFrameTrace = false;
+        public int frameTraceWindow = 300;
+        public boolean frameTraceGlFinish = false;
     }
 
     public static class QualitySettings {
@@ -106,6 +113,11 @@ public class SodiumGameOptions {
         } else {
             config = new SodiumGameOptions();
         }
+
+        // Hand the trace switches over as soon as the options are known, so the instrument is
+        // already in the right state before the first frame is drawn.
+        FrameTrace.configure(config.advanced.enableFrameTrace, config.advanced.frameTraceWindow,
+                config.advanced.frameTraceGlFinish);
 
         try {
             writeToDisk(config);

@@ -61,5 +61,11 @@
   "sodium.console.core_shaders_warn": "The following resource packs may be incompatible with Sodium:",
   "sodium.console.core_shaders_info": "Check the game log for detailed information.",
   "sodium.console.config_not_loaded": "The configuration file for Sodium has been corrupted, or is currently unreadable. Some options have been temporarily reset to their defaults. Please open the Video Settings screen to resolve this problem.",
-  "sodium.console.config_file_was_reset": "The config file has been reset to known-good defaults."
+  "sodium.console.config_file_was_reset": "The config file has been reset to known-good defaults.",
+  "sodium.options.frame_trace.name": "Frame Trace",
+  "sodium.options.frame_trace.tooltip": "Records what the chunk render path actually does, one row per frame, into sodium-trace.csv in the game directory.\n\nIt counts the regions the render walk visits, the sub-draws handed to the driver before and after Sodium's contiguous merge, and the distribution of sub-draws per region, so that optimisation is aimed at a measured bottleneck rather than a guessed one.\n\nThis is a measuring instrument, not a performance option: the counters and the CSV write cost time while it is on. Leave it off unless you are collecting data.",
+  "sodium.options.frame_trace_window.name": "Frame Trace Window",
+  "sodium.options.frame_trace_window.tooltip": "Frames per flush of the trace file, and per summary line in the log. Only used while Frame Trace is enabled.",
+  "sodium.options.frame_trace_gl_finish.name": "Frame Trace: GL Finish",
+  "sodium.options.frame_trace_gl_finish.tooltip": "Also waits for the GPU (glFinish) around every region draw, so the recorded draw time is completion rather than submission.\n\nThis serialises the render pipeline and will visibly lower the frame rate: it is for one-off runs that separate CPU time from GPU time, never for judging performance. Only used while Frame Trace is enabled."
 }

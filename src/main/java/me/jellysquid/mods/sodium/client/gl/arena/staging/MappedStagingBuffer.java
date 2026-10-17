@@ -19,8 +19,9 @@ public class MappedStagingBuffer implements StagingBuffer {
     // against libmobileglues, on this exact Sodium staging workload): COHERENT + CLIENT_STORAGE
     // off. A coherent mapping makes flushMappedRange a no-op in the MobileGlues layer (skipping
     // the driver-call), while CLIENT_STORAGE costs an allocation penalty on this TBDR. Median
-    // 0.255ms vs 0.310ms for EXPLICIT_FLUSH+auto. EXPLICIT_FLUSH is kept so the unconditional
-    // glFlushMappedBufferRange in GLRenderDevice stays a legal call.
+    // 0.255ms vs 0.310ms for EXPLICIT_FLUSH+auto. EXPLICIT_FLUSH is kept alongside COHERENT --
+    // the spec only forbids COHERENT without PERSISTENT -- so a glFlushMappedBufferRange on this
+    // mapping would stay a legal call, even though flush() no longer needs to make one.
     private static final EnumBitField<GlBufferStorageFlags> STORAGE_FLAGS =
             EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.COHERENT, GlBufferStorageFlags.MAP_WRITE);
 
@@ -96,12 +97,13 @@ public class MappedStagingBuffer implements StagingBuffer {
             return;
         }
 
-        if (this.pos < this.start) {
-            commandList.flushMappedRange(this.mappedBuffer.map, this.start, this.capacity - this.start);
-            commandList.flushMappedRange(this.mappedBuffer.map, 0, this.pos);
-        } else {
-            commandList.flushMappedRange(this.mappedBuffer.map, this.start, this.pos - this.start);
-        }
+        // The staging buffer is allocated and mapped COHERENT (see STORAGE_FLAGS and MAP_FLAGS), so
+        // every write made through the mapping is already visible to the GPU with no further
+        // action: EXT_buffer_storage, "If MAP_COHERENT_BIT_EXT is set and the client performs a
+        // write, then in subsequent commands the server will see the writes". The two
+        // flushMappedRange calls this used to make only bought a driver round-trip (plus the buffer
+        // bind each one performs) per frame, so they are gone, and the wrap-around split that
+        // decided which ranges to flush went with them.
 
         int bytes = 0;
 
