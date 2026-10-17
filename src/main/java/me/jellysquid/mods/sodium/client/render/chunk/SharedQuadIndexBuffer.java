@@ -7,6 +7,7 @@ import me.jellysquid.mods.sodium.client.gl.buffer.GlMutableBuffer;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
 import me.jellysquid.mods.sodium.client.gl.tessellation.GlIndexType;
 import me.jellysquid.mods.sodium.client.gl.util.EnumBitField;
+import me.jellysquid.mods.sodium.client.util.FrameTrace;
 
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -27,6 +28,8 @@ public class SharedQuadIndexBuffer {
     }
 
     public void ensureCapacity(CommandList commandList, int elementCount) {
+        FrameTrace.inc(FrameTrace.INDEX_ENSURE);
+
         if (elementCount > this.indexType.getMaxElementCount()) {
             throw new IllegalArgumentException("Tried to reserve storage for more vertices in this buffer than it can hold");
         }
@@ -43,6 +46,8 @@ public class SharedQuadIndexBuffer {
     }
 
     private void grow(CommandList commandList, int primitiveCount) {
+        FrameTrace.inc(FrameTrace.INDEX_GROW);
+
         var bufferSize = primitiveCount * this.indexType.getBytesPerElement() * ELEMENTS_PER_PRIMITIVE;
 
         commandList.allocateStorage(this.buffer, bufferSize, GlBufferUsage.STATIC_DRAW);

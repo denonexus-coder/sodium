@@ -29,6 +29,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkMeshForm
 import me.jellysquid.mods.sodium.client.render.util.RenderAsserts;
 import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
 import me.jellysquid.mods.sodium.client.render.viewport.Viewport;
+import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import me.jellysquid.mods.sodium.client.util.MathUtil;
 import me.jellysquid.mods.sodium.client.world.WorldSlice;
 import me.jellysquid.mods.sodium.client.world.cloned.ChunkRenderContext;
@@ -105,6 +106,10 @@ public class RenderSectionManager {
     }
 
     public void update(Camera camera, Viewport viewport, int frame, boolean spectator) {
+        // Frame boundary: the previous frame's terrain passes are complete by now, so its counters
+        // are closed and written out here before this frame's work starts.
+        FrameTrace.frameTick();
+
         this.lastCameraPosition = camera.getBlockPos();
 
         this.createTerrainRenderList(camera, viewport, frame, spectator);

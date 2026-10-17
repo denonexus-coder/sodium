@@ -23,6 +23,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkMeshAttr
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
 import me.jellysquid.mods.sodium.client.util.BitwiseMath;
+import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.system.MemoryUtil;
 
@@ -46,6 +47,9 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                        ChunkRenderListIterable renderLists,
                        TerrainRenderPass renderPass,
                        CameraTransform camera) {
+        final long tRender = FrameTrace.now();
+        FrameTrace.inc(FrameTrace.PASSES);
+
         super.begin(renderPass);
 
         boolean useBlockFaceCulling = SodiumClientMod.options().performance.useBlockFaceCulling;
@@ -59,6 +63,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         // that was not submitted before. One query per render pass against thousands of sub-draws
         // is not a measurable cost, and the state is answered locally from the state object.
         boolean cullFaceEnabled = GL11C.glIsEnabled(GL11C.GL_CULL_FACE);
+        FrameTrace.inc(FrameTrace.CULL_QUERIES);
 
         ChunkShaderInterface shader = this.activeProgram.getInterface();
         shader.setProjectionMatrix(matrices.projection());
@@ -69,28 +74,48 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         while (iterator.hasNext()) {
             ChunkRenderList renderList = iterator.next();
 
+            FrameTrace.inc(FrameTrace.REGION_VISITED);
+
             var region = renderList.getRegion();
             var storage = region.getStorage(renderPass);
 
             if (storage == null) {
+                FrameTrace.inc(FrameTrace.REGION_NO_STORAGE);
                 continue;
             }
 
+            final long tFill = FrameTrace.now();
             fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, cullFaceEnabled);
+            FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
             if (this.batch.isEmpty()) {
+                FrameTrace.inc(FrameTrace.REGION_EMPTY);
                 continue;
             }
 
+            FrameTrace.inc(FrameTrace.REGION_DRAWN);
+            FrameTrace.add(FrameTrace.SUBDRAWS_POST, this.batch.size);
+            FrameTrace.histPostMerge(this.batch.size);
+
+            final long tEnsure = FrameTrace.now();
             this.sharedIndexBuffer.ensureCapacity(commandList, this.batch.getIndexBufferSize());
+            FrameTrace.addTime(FrameTrace.T_ENSURE, tEnsure);
 
             var tessellation = this.prepareTessellation(commandList, region);
 
             setModelMatrixUniforms(shader, region, camera);
+
+            FrameTrace.inc(FrameTrace.MULTIDRAW_CALLS);
+            FrameTrace.beforeRegionDraw();
+            final long tDraw = FrameTrace.now();
             executeDrawBatch(commandList, tessellation, this.batch);
+            FrameTrace.addTime(FrameTrace.T_DRAW, tDraw);
+            FrameTrace.afterRegionDraw();
         }
 
         super.end(renderPass);
+
+        FrameTrace.addTime(FrameTrace.T_RENDER, tRender);
     }
 
     private static void fillCommandBuffer(MultiDrawBatch batch,
@@ -105,54 +130,77 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
         var iterator = renderList.sectionsWithGeometryIterator(pass.isReverseOrder());
 
-        if (iterator == null) {
-            return;
-        }
+        // Sub-draws added before mergeContiguousCommands(); one per set face bit, which is exactly
+        // what addDrawCommands() appends.
+        int preMerge = 0;
 
-        int originX = renderRegion.getChunkX();
-        int originY = renderRegion.getChunkY();
-        int originZ = renderRegion.getChunkZ();
+        if (iterator != null) {
+            int originX = renderRegion.getChunkX();
+            int originY = renderRegion.getChunkY();
+            int originZ = renderRegion.getChunkZ();
 
-        while (iterator.hasNext()) {
-            int sectionIndex = iterator.nextByteAsInt();
+            while (iterator.hasNext()) {
+                int sectionIndex = iterator.nextByteAsInt();
 
-            int chunkX = originX + LocalSectionIndex.unpackX(sectionIndex);
-            int chunkY = originY + LocalSectionIndex.unpackY(sectionIndex);
-            int chunkZ = originZ + LocalSectionIndex.unpackZ(sectionIndex);
+                FrameTrace.inc(FrameTrace.SECTIONS_ITER);
 
-            var pMeshData = renderDataStorage.getDataPointer(sectionIndex);
+                int chunkX = originX + LocalSectionIndex.unpackX(sectionIndex);
+                int chunkY = originY + LocalSectionIndex.unpackY(sectionIndex);
+                int chunkZ = originZ + LocalSectionIndex.unpackZ(sectionIndex);
 
-            final int geometryMask = SectionRenderDataUnsafe.getSliceMask(pMeshData);
+                var pMeshData = renderDataStorage.getDataPointer(sectionIndex);
 
-            int slices;
+                final int geometryMask = SectionRenderDataUnsafe.getSliceMask(pMeshData);
 
-            if (!useBlockFaceCulling) {
-                slices = ModelQuadFacing.ALL;
-            } else {
-                final int visible = getVisibleFaces(camera.intX, camera.intY, camera.intZ, chunkX, chunkY, chunkZ);
+                int slices;
 
-                if (cullFaceEnabled) {
-                    // Merge-aware: one contiguous run per section, folded to one draw below.
-                    slices = expandToGeometryRun(visible, geometryMask);
+                if (!useBlockFaceCulling) {
+                    slices = ModelQuadFacing.ALL;
                 } else {
-                    // Without a cull in the driver the plane test is the only thing keeping back
-                    // faces off screen, so widen nothing: exactly what was always submitted.
-                    slices = visible;
+                    final int visible = getVisibleFaces(camera.intX, camera.intY, camera.intZ, chunkX, chunkY, chunkZ);
+
+                    FrameTrace.add(FrameTrace.FACES_VISIBLE, Integer.bitCount(visible & geometryMask));
+
+                    if (cullFaceEnabled) {
+                        // Merge-aware: one contiguous run per section, folded to one draw below.
+                        slices = expandToGeometryRun(visible, geometryMask);
+
+                        FrameTrace.add(FrameTrace.FACES_EXPANDED, Integer.bitCount(slices & ~visible));
+                    } else {
+                        // Without a cull in the driver the plane test is the only thing keeping back
+                        // faces off screen, so widen nothing: exactly what was always submitted.
+                        slices = visible;
+                    }
+                }
+
+                slices &= geometryMask;
+
+                if (slices != 0) {
+                    final int commands = Integer.bitCount(slices);
+
+                    preMerge += commands;
+                    FrameTrace.add(FrameTrace.FACES_SUBMITTED, commands);
+
+                    addDrawCommands(batch, pMeshData, slices);
+                } else {
+                    FrameTrace.inc(FrameTrace.SECTIONS_EMPTY);
                 }
             }
-
-            slices &= geometryMask;
-
-            if (slices != 0) {
-                addDrawCommands(batch, pMeshData, slices);
-            }
         }
+
+        FrameTrace.histPreMerge(preMerge);
+        FrameTrace.add(FrameTrace.SUBDRAWS_PRE, preMerge);
 
         // Every command in this batch reads the single shared quad index buffer (a monotonic
         // pattern), so contiguous sub-draws can be folded into fewer draw calls. This must run
         // before render() calls ensureCapacity(getIndexBufferSize()), since a merged command
         // reports a larger element count and the template has to cover it.
+        final long tMerge = FrameTrace.now();
+
         batch.mergeContiguousCommands();
+
+        FrameTrace.addTime(FrameTrace.T_MERGE, tMerge);
+        FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, preMerge - batch.size);
     }
 
     @SuppressWarnings("IntegerMultiplicationImplicitCastToLong")
