@@ -4,6 +4,7 @@ import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.data.fingerprint.HashedFingerprint;
 import me.jellysquid.mods.sodium.client.gui.console.Console;
 import me.jellysquid.mods.sodium.client.gui.console.message.MessageLevel;
+import me.jellysquid.mods.sodium.client.gui.flywheel.FlywheelOptionsPage;
 import me.jellysquid.mods.sodium.client.gui.options.*;
 import me.jellysquid.mods.sodium.client.gui.options.control.Control;
 import me.jellysquid.mods.sodium.client.gui.options.control.ControlElement;
@@ -65,6 +66,14 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.pages.add(SodiumGameOptionPages.quality());
         this.pages.add(SodiumGameOptionPages.performance());
         this.pages.add(SodiumGameOptionPages.advanced());
+
+        // Flywheel's own page, but only when Flywheel is installed: a tab that would open on
+        // nothing but greyed rows is worse than no tab at all.
+        OptionPage flywheelPage = FlywheelOptionsPage.create();
+
+        if (flywheelPage != null) {
+            this.pages.add(flywheelPage);
+        }
 
         this.checkPromptTimers();
     }

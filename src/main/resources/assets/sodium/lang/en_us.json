@@ -67,5 +67,42 @@
   "sodium.options.frame_trace_window.name": "Frame Trace Window",
   "sodium.options.frame_trace_window.tooltip": "Frames per flush of the trace file, and per summary line in the log. Only used while Frame Trace is enabled.",
   "sodium.options.frame_trace_gl_finish.name": "Frame Trace: GL Finish",
-  "sodium.options.frame_trace_gl_finish.tooltip": "Also waits for the GPU (glFinish) around every region draw, so the recorded draw time is completion rather than submission.\n\nThis serialises the render pipeline and will visibly lower the frame rate: it is for one-off runs that separate CPU time from GPU time, never for judging performance. Only used while Frame Trace is enabled."
+  "sodium.options.frame_trace_gl_finish.tooltip": "Also waits for the GPU (glFinish) around every region draw, so the recorded draw time is completion rather than submission.\n\nThis serialises the render pipeline and will visibly lower the frame rate: it is for one-off runs that separate CPU time from GPU time, never for judging performance. Only used while Frame Trace is enabled.",
+
+  "sodium.options.pages.flywheel": "Flywheel",
+
+  "sodium.options.flywheel.enabled.name": "Enable Flywheel",
+  "sodium.options.flywheel.enabled.tooltip": "Draws block entities, models and other virtual geometry as instanced batches through Flywheel's backend, instead of handing them to the renderer one object at a time.\n\nOn this device the default backend is instancing, so \"on\" and \"automatic\" are the same switch.\n\nTurning it off restores plain rendering and leaves every other setting on this page alone: they are kept and persisted either way, ready for the next time Flywheel is on. Applying this rebuilds the renderer.",
+
+  "sodium.options.flywheel.mobile_driver.name": "Mobile Driver Detected",
+  "sodium.options.flywheel.mobile_driver.tooltip": "Read-only. True when the OpenGL strings identified a mobile or translation-layer driver, which on this device means MobileGlues over a PowerVR GPU.\n\nFlywheel reads this once at startup and uses it to decide which upload and render paths are worth their cost here. It cannot be changed from a settings screen.",
+
+  "sodium.options.flywheel.worker_threads.name": "Shader Worker Threads",
+  "sodium.options.flywheel.worker_threads.tooltip": "How many threads precompile Flywheel's shaders.\n\nAutomatic (-1) picks a count from the CPU. 0 keeps compilation on the render thread, which is the cheapest in memory and the slowest to get new pipelines ready. A fixed number finishes first use of a pipeline sooner, in exchange for RAM.\n\nThe pool is created once and cached for the life of the game, so this one needs a restart: applying it stores the choice, and it takes effect the next time the game starts.",
+
+  "sodium.options.flywheel.worker_threads.value.auto": "Auto",
+  "sodium.options.flywheel.worker_threads.value.off": "Render Thread",
+
+  "sodium.options.flywheel.limit_updates.name": "Distance Update Limiting",
+  "sodium.options.flywheel.limit_updates.tooltip": "Updates objects that are far from the camera on a banded schedule instead of every frame, while nearby ones are still updated every frame.\n\nOn by default. Turning it off means every tracked object is rebuilt regardless of distance, which is usually one of the larger CPU costs in a world with a lot of machinery or block entities. Applying this rebuilds the renderer.",
+
+  "sodium.options.flywheel.light_smoothness.name": "Light Smoothness",
+  "sodium.options.flywheel.light_smoothness.tooltip": "How light is read across a block face.\n\nFlat is the cheapest and bands visibly along edges. Tri-linear interpolates across the face without the inner-face correction. Smooth, the default, follows the face's own geometry. Smooth (inner face corrected) adds a correction that keeps light consistent either side of a solid block.\n\nThis is part of the shader key, so changing it recompiles Flywheel's pipelines and applies with a short hitch. Worth settling once rather than flipping.",
+
+  "sodium.options.flywheel.light_smoothness.flat": "Flat",
+  "sodium.options.flywheel.light_smoothness.tri_linear": "Tri-linear",
+  "sodium.options.flywheel.light_smoothness.smooth": "Smooth",
+  "sodium.options.flywheel.light_smoothness.smooth_inner_face_corrected": "Smooth + Inner Face",
+
+  "sodium.options.flywheel.orphan_upload.name": "Orphaned Instance Uploads",
+  "sodium.options.flywheel.orphan_upload.tooltip": "Uploads an instancer's whole array in one go, instead of patching only the spans that actually changed.\n\nA driver that makes a partial update wait for an in-flight read pays for that stall every frame; measured on this hardware, patching the spans costs several times more than re-uploading at a few thousand instances. Orphaning lets the driver rename the buffer and hand back a fresh one. This is the default on mobile and translation-layer drivers, and is ignored on a desktop driver that renames buffers anyway.\n\nRead inside the upload itself, so it starts working on the next frame with no reload.",
+
+  "sodium.options.flywheel.oit.name": "Order-Independent Transparency",
+  "sodium.options.flywheel.oit.tooltip": "Renders translucent geometry without draw-order artefacts, using several colour attachments and a few full-screen passes.\n\nOn a tile-based GPU each of those passes is a tile load and store, which makes this the most expensive switch on the page. Turning it off renders the same materials as ordinary translucency: cheaper by a wide margin, at the price of the ordering artefacts you would see without it.\n\nThe framebuffer belongs to the renderer, so this applies with a reload.",
+
+  "sodium.options.flywheel.disable_particles.name": "Disable Particles",
+  "sodium.options.flywheel.disable_particles.tooltip": "Drops every particle at the source, before it is spawned.\n\nA straight frame-rate trade: no smoke, splash, critical-hit or ambient particles at all. When the GPU is the limit this is one of the largest per-frame wins available.\n\nTakes effect immediately.",
+
+  "sodium.options.flywheel.freeze_gui.name": "Freeze GUI Item Animation",
+  "sodium.options.flywheel.freeze_gui.tooltip": "Stops animated texture frames on items and blocks in the GUI from being re-uploaded while a screen is open.\n\nOpening the inventory normally re-uploads every animated sprite each tick; with this on those uploads pause until the screen closes, and the animation resumes as soon as it does.\n\nTakes effect immediately."
 }

@@ -1,0 +1,38 @@
+{
+  "sodium.options.pages.flywheel": "Flywheel",
+
+  "sodium.options.flywheel.enabled.name": "Ativar Flywheel",
+  "sodium.options.flywheel.enabled.tooltip": "Desenha entidades de blocos, modelos e outra geometria virtual em lotes instanciados através do motor do Flywheel, em vez de os entregar ao renderizador um objeto de cada vez.\n\nNeste dispositivo o motor predefinido é o instancing, por isso \"ligado\" e \"automático\" são o mesmo interruptor.\n\nDesligar repõe a renderização normal e deixa todas as outras definições desta página intactas: são guardadas e persistidas em qualquer dos casos, prontas para a próxima vez que o Flywheel esteja ligado. Aplicar reconstrói o renderizador.",
+
+  "sodium.options.flywheel.mobile_driver.name": "Driver Móvel Detetado",
+  "sodium.options.flywheel.mobile_driver.tooltip": "Apenas de leitura. Verdadeiro quando as strings do OpenGL identificaram um driver móvel ou de camada de tradução, que neste dispositivo significa MobileGlues sobre uma PowerVR.\n\nO Flywheel lê isto uma vez ao arrancar e usa-o para decidir que caminhos de upload e renderização compensam aqui. Não pode ser alterado a partir do menu.",
+
+  "sodium.options.flywheel.worker_threads.name": "Threads de Compilação de Shaders",
+  "sodium.options.flywheel.worker_threads.tooltip": "Quantas threads pré-compilam os shaders do Flywheel.\n\nAutomático (-1) escolhe uma quantidade com base na CPU. 0 mantém a compilação na thread de renderização, o que é o mais barato em memória e o mais demorado a ter os pipelines prontos. Um número fixo termina mais depressa o primeiro uso de um pipeline, em troca de RAM.\n\nO conjunto de threads é criado uma vez e guardado durante toda a vida do jogo, por isso esta opção exige reinício: aplicar guarda a escolha e ela tem efeito na próxima arrancada do jogo.",
+
+  "sodium.options.flywheel.worker_threads.value.auto": "Auto",
+  "sodium.options.flywheel.worker_threads.value.off": "Thread de Renderização",
+
+  "sodium.options.flywheel.limit_updates.name": "Limitação de Atualização por Distância",
+  "sodium.options.flywheel.limit_updates.tooltip": "Atualiza os objetos longe da câmara segundo um calendário em faixas, em vez de todos os frames, mantendo os próximos a serem atualizados em todos os frames.\n\nAtivo por predefinição. Desativar significa reconstruir todos os objetos acompanhados independentemente da distância, o que é normalmente um dos maiores custos de CPU num mundo com muita maquinaria ou entidades de blocos. Aplicar reconstrói o renderizador.",
+
+  "sodium.options.flywheel.light_smoothness.name": "Suavidade da Iluminação",
+  "sodium.options.flywheel.light_smoothness.tooltip": "Como a iluminação é lida ao longo de uma face de bloco.\n\nPlano é o mais barato e mostra bandas visíveis nos bordos. Trilinear interpola ao longo da face sem a correção da face interna. Suave, o predefinido, segue a própria geometria da face. Suave + face interna acrescenta uma correção que mantém a iluminação consistente de ambos os lados de um bloco sólido.\n\nIsto faz parte da chave do shader, por isso alterá-lo recompila os pipelines do Flywheel e é aplicado com uma pequena pausa. Vale a pena definir uma vez em vez de alternar.",
+
+  "sodium.options.flywheel.light_smoothness.flat": "Plano",
+  "sodium.options.flywheel.light_smoothness.tri_linear": "Trilinear",
+  "sodium.options.flywheel.light_smoothness.smooth": "Suave",
+  "sodium.options.flywheel.light_smoothness.smooth_inner_face_corrected": "Suave + Face Interna",
+
+  "sodium.options.flywheel.orphan_upload.name": "Uploads Órfãos de Instâncias",
+  "sodium.options.flywheel.orphan_upload.tooltip": "Envia o array completo de um instancer de uma só vez, em vez de corrigir apenas os intervalos que realmente mudaram.\n\nUm driver que faz uma atualização parcial esperar por uma leitura em curso paga essa espera todos os frames; medido neste hardware, corrigir os intervalos custa várias vezes mais do que reenviar com alguns milhares de instâncias. O órfão deixa o driver renomear a devolver um buffer novo. É o predefinido em drivers móveis e de camada de tradução, e é ignorado num driver de desktop que renomeia buffers de qualquer modo.\n\nÉ lido dentro do próprio upload, por isso começa a ter efeito no próximo frame, sem reconstruir nada.",
+
+  "sodium.options.flywheel.oit.name": "Transparência Independente da Ordem",
+  "sodium.options.flywheel.oit.tooltip": "Renderiza geometria translúcida sem artefactos de ordem de desenho, usando vários anexos de cor e algumas passagens de ecrã inteiro.\n\nNuma GPU de tiling cada uma dessas passagens é um carregamento e armazenamento de tile, o que faz desta a opção mais cara da página. Desligá-la renderiza os mesmos materiais como translucência normal: muito mais barata, ao preço dos artefactos de ordem que veria sem ela.\n\nO framebuffer pertence ao renderizador, por isso aplica-se com reconstrução.",
+
+  "sodium.options.flywheel.disable_particles.name": "Desativar Partículas",
+  "sodium.options.flywheel.disable_particles.tooltip": "Elimina cada partícula na origem, antes de ser criada.\n\nUm compromisso direto de taxa de frames: nenhuma partícula de fumo, salpicos, acertos críticos ou ambiente. Quando o limitador é a GPU, esta é uma das maiores conquistas por frame disponíveis.\n\nTem efeito imediato.",
+
+  "sodium.options.flywheel.freeze_gui.name": "Congelar Animação de Itens no Menu",
+  "sodium.options.flywheel.freeze_gui.tooltip": "Impede que os frames animados de texturas de itens e blocos no menu sejam reenviados enquanto um ecrã está aberto.\n\nAbrir o inventário reenvia normalmente cada sprite animado a cada tick; com isto ativo esses uploads pausam até o ecrã fechar, e a animação retoma assim que ele fecha.\n\nTem efeito imediato."
+}
