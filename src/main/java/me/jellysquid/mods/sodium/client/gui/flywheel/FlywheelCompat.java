@@ -294,11 +294,51 @@ public final class FlywheelCompat {
 		}
 
 		try {
-			Class<?> type = BACKEND_CONFIG_LIGHT_SMOOTHNESS.getType();
-			BACKEND_CONFIG_LIGHT_SMOOTHNESS.set(backendConfig, Enum.valueOf(type, value.toUpperCase(Locale.ROOT)));
+			Object constant = enumConstant(value);
+
+			if (constant == null) {
+				// Writing null here would leave the config with no light smoothness at all, and
+				// the shader compiler reads it while building pipelines. Refusing the change is
+				// the only safe answer, and it cannot happen through the page: the control only
+				// offers names Flywheel's enum already has.
+				LOGGER.warn("Flywheel has no light smoothness constant named '{}', leaving it unchanged", value);
+				return;
+			}
+
+			BACKEND_CONFIG_LIGHT_SMOOTHNESS.set(backendConfig, constant);
 		} catch (Throwable t) {
 			LOGGER.warn("Could not set Flywheel light smoothness to '{}'", value, t);
 		}
+	}
+
+	/**
+	 * The constant of Flywheel's own enum whose name matches {@code value}, case-insensitively, or
+	 * {@code null} when Flywheel has no such constant.
+	 *
+	 * <p>This walks the constants rather than calling {@code Enum.valueOf}. The enum's class is
+	 * only known as a {@code Class<?>}, and {@code valueOf} insists on {@code Class<T>} where
+	 * {@code T extends Enum<T>}, which an unknown class cannot be proven to satisfy. Matching by
+	 * name against the constants is the same result with no unchecked cast standing between a
+	 * typo and a config write.
+	 */
+	@Nullable
+	private static Object enumConstant(String value) {
+		Class<?> type = BACKEND_CONFIG_LIGHT_SMOOTHNESS.getType();
+		Object[] constants = type.getEnumConstants();
+
+		if (constants == null) {
+			return null;
+		}
+
+		String wanted = value.toUpperCase(Locale.ROOT);
+
+		for (Object constant : constants) {
+			if (constant instanceof Enum<?> e && e.name().equals(wanted)) {
+				return constant;
+			}
+		}
+
+		return null;
 	}
 
 	// -------------------------------------------------------------- mobile
