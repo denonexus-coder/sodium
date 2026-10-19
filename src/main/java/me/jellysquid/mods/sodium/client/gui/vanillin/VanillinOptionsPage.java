@@ -13,6 +13,7 @@ import me.jellysquid.mods.sodium.client.gui.options.OptionImpl;
 import me.jellysquid.mods.sodium.client.gui.options.OptionPage;
 import me.jellysquid.mods.sodium.client.gui.options.control.CyclingControl;
 import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import org.jetbrains.annotations.Nullable;
 
@@ -136,7 +137,9 @@ public final class VanillinOptionsPage {
 	 * an experimental visual sitting on {@code Default} is off in a production environment.
 	 */
 	private static Text tooltip(VanillinCompat.Entry entry) {
-		Text out = Text.empty()
+		// MutableText, not Text: append() lives on the mutable type, so holding the result as a
+		// Text would compile the first line and then fail to find append on the ones after it.
+		MutableText out = Text.empty()
 				.append(Text.translatable("sodium.options.vanillin.tooltip.prefix"))
 				.append(Text.literal("\n\n"));
 
