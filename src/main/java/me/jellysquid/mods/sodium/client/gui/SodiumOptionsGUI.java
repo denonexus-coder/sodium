@@ -5,6 +5,7 @@ import me.jellysquid.mods.sodium.client.data.fingerprint.HashedFingerprint;
 import me.jellysquid.mods.sodium.client.gui.console.Console;
 import me.jellysquid.mods.sodium.client.gui.console.message.MessageLevel;
 import me.jellysquid.mods.sodium.client.gui.flywheel.FlywheelOptionsPage;
+import me.jellysquid.mods.sodium.client.gui.vanillin.VanillinOptionsPage;
 import me.jellysquid.mods.sodium.client.gui.options.*;
 import me.jellysquid.mods.sodium.client.gui.options.control.Control;
 import me.jellysquid.mods.sodium.client.gui.options.control.ControlElement;
@@ -73,6 +74,15 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
 
         if (flywheelPage != null) {
             this.pages.add(flywheelPage);
+        }
+
+        // Vanillin decides which vanilla objects Flywheel instances. Its page is listed after
+        // Flywheel's because it configures what the engine draws, not how the engine runs, and it
+        // is hidden the same way: no Vanillin, no tab.
+        OptionPage vanillinPage = VanillinOptionsPage.create();
+
+        if (vanillinPage != null) {
+            this.pages.add(vanillinPage);
         }
 
         this.checkPromptTimers();

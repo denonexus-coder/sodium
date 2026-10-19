@@ -104,5 +104,19 @@
   "sodium.options.flywheel.disable_particles.tooltip": "Drops every particle at the source, before it is spawned.\n\nA straight frame-rate trade: no smoke, splash, critical-hit or ambient particles at all. When the GPU is the limit this is one of the largest per-frame wins available.\n\nTakes effect immediately.",
 
   "sodium.options.flywheel.freeze_gui.name": "Freeze GUI Item Animation",
-  "sodium.options.flywheel.freeze_gui.tooltip": "Stops animated texture frames on items and blocks in the GUI from being re-uploaded while a screen is open.\n\nOpening the inventory normally re-uploads every animated sprite each tick; with this on those uploads pause until the screen closes, and the animation resumes as soon as it does.\n\nTakes effect immediately."
+  "sodium.options.flywheel.freeze_gui.tooltip": "Stops animated texture frames on items and blocks in the GUI from being re-uploaded while a screen is open.\n\nOpening the inventory normally re-uploads every animated sprite each tick; with this on those uploads pause until the screen closes, and the animation resumes as soon as it does.\n\nTakes effect immediately.",
+
+  "sodium.options.pages.vanillin": "Flywheel Visuals",
+
+  "sodium.options.vanillin.instancing.name": "Vanillin Instancing",
+  "sodium.options.vanillin.instancing.tooltip": "Read-only. Vanillin is installed, so every visual it knows about is listed below.\n\nVanillin decides which vanilla objects Flywheel draws as instanced batches instead of handing them to the vanilla renderer. Flywheel itself provides the engine; without Vanillin (or a mod like it) it draws nothing of its own.",
+
+  "sodium.options.vanillin.state.default": "Default",
+  "sodium.options.vanillin.state.disable": "Vanilla",
+  "sodium.options.vanillin.state.force_enable": "Force Instanced",
+
+  "sodium.options.vanillin.tooltip.prefix": "How this object is drawn.\n\nDefault hands the decision back to Vanillin. Vanilla removes the visualizer, so the object is rendered exactly as if Vanillin were absent. Force Instanced installs one even where another mod has asked Vanillin to leave it alone.",
+  "sodium.options.vanillin.tooltip.stable": "Vanillin turns this on by default.\nIt is one of the visuals shipped as stable, so leaving it on Default keeps it instanced.",
+  "sodium.options.vanillin.tooltip.experimental": "Vanillin ships this as experimental, so it is OFF on Default outside a development environment.\nChoose Force Instanced to turn it on.",
+  "sodium.options.vanillin.tooltip.restart": "Vanillin builds its registry during startup: a restart is needed for this to fully apply."
 }
