@@ -41,48 +41,75 @@ public class SodiumGameOptionPages {
     private static final SodiumOptionsStorage sodiumOpts = new SodiumOptionsStorage();
     private static final MinecraftOptionsStorage vanillaOpts = new MinecraftOptionsStorage();
 
+    /**
+     * Iris 1.7.x injects into this class with Mixin slices anchored on vanilla translation keys:
+     * {@code options.renderDistance} → {@code options.simulationDistance} in {@link #general()},
+     * and {@code options.graphics} → {@code options.renderClouds} in {@link #quality()}.
+     *
+     * <p>This build shows literal Portuguese, so those keys no longer occur naturally. Without the
+     * constants, Iris fails its injection check with "Scanned 0 target(s)" and the game crashes the
+     * moment the options screen opens. These no-op calls keep the exact string constants in the
+     * bytecode, in the order and position the slices expect; they run once while the pages are
+     * built and have no other effect.
+     */
+    private static void irisSliceAnchor(String key) {
+        // Intentionally empty: the argument is the anchor, not data used at runtime.
+    }
+
     public static OptionPage general() {
         List<OptionGroup> groups = new ArrayList<>();
 
-        groups.add(OptionGroup.createBuilder()
-                .setName(Text.literal("Mundo"))
-                .add(OptionImpl.createBuilder(int.class, vanillaOpts)
-                        .setName(Text.literal("Distância de renderização"))
-                        .setTooltip(Text.literal("Até onde o terreno é construído e desenhado, em chunks de 16×16. "
-                                + "Cada passo alarga a área ao quadrado: 12 chunks mostram mais do dobro de terreno que 8.\n\n"
-                                + "O que afeta: quantas secções de terreno entram na passagem de desenho, a memória das malhas "
-                                + "e o número de chamadas ao driver. É a opção com maior efeito na taxa de fotogramas; "
-                                + "baixar dois chunks costuma valer mais que todas as outras juntas.\n\n"
-                                + "Não mexe na simulação: o servidor interno continua a carregar e a simular o que a opção "
-                                + "seguinte mandar. Precisa de recarregar o renderizador."))
-                        .setControl(option -> new SliderControl(option, 2, 32, 1, chunks()))
-                        .setBinding((options, value) -> options.getViewDistance().setValue(value), options -> options.getViewDistance().getValue())
-                        .setImpact(OptionImpact.HIGH)
-                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
-                        .build())
-                .add(OptionImpl.createBuilder(int.class, vanillaOpts)
-                        .setName(Text.literal("Distância de simulação"))
-                        .setTooltip(Text.literal("Até onde o servidor interno carrega e simula blocos, entidades e ticks, em chunks. "
-                                + "É independente da distância de renderização: podes desenhar 16 chunks e simular 5.\n\n"
-                                + "O que afeta: carga de CPU, ticks de mobs, fornos, crescimento de plantas, redstone e a memória "
-                                + "das chunks carregadas. Uma distância de simulação maior que a de renderização mantém vivo o que "
-                                + "não vês; menor alivia o CPU sem tirar paisagem.\n\n"
-                                + "Precisa de recarregar o renderizador."))
-                        .setControl(option -> new SliderControl(option, 5, 32, 1, chunks()))
-                        .setBinding((options, value) -> options.getSimulationDistance().setValue(value), options -> options.getSimulationDistance().getValue())
-                        .setImpact(OptionImpact.HIGH)
-                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
-                        .build())
-                .add(OptionImpl.createBuilder(int.class, vanillaOpts)
-                        .setName(Text.literal("Brilho"))
-                        .setTooltip(Text.literal("Multiplica o brilho final da imagem — o gamma do jogo. Não altera a luz calculada "
-                                + "no mundo: só levanta o que já foi calculado, por isso não revela nada numa caverna sem luz, "
-                                + "apenas torna o escuro menos escuro.\n\n"
-                                + "O que afeta: só a cor final dos píxeis. Custo zero por frame. Vale no frame seguinte."))
-                        .setControl(opt -> new SliderControl(opt, 0, 100, 1, brightness()))
-                        .setBinding((opts, value) -> opts.getGamma().setValue(value * 0.01D), (opts) -> (int) (opts.getGamma().getValue() / 0.01D))
-                        .build())
-                .build());
+        Option<Integer> viewDistance = OptionImpl.createBuilder(int.class, vanillaOpts)
+                .setName(Text.literal("Distância de renderização"))
+                .setTooltip(Text.literal("Até onde o terreno é construído e desenhado, em chunks de 16×16. "
+                        + "Cada passo alarga a área ao quadrado: 12 chunks mostram mais do dobro de terreno que 8.\n\n"
+                        + "O que afeta: quantas secções de terreno entram na passagem de desenho, a memória das malhas "
+                        + "e o número de chamadas ao driver. É a opção com maior efeito na taxa de fotogramas; "
+                        + "baixar dois chunks costuma valer mais que todas as outras juntas.\n\n"
+                        + "Não mexe na simulação: o servidor interno continua a carregar e a simular o que a opção "
+                        + "seguinte mandar. Precisa de recarregar o renderizador."))
+                .setControl(option -> new SliderControl(option, 2, 32, 1, chunks()))
+                .setBinding((options, value) -> options.getViewDistance().setValue(value), options -> options.getViewDistance().getValue())
+                .setImpact(OptionImpact.HIGH)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Integer> simulationDistance = OptionImpl.createBuilder(int.class, vanillaOpts)
+                .setName(Text.literal("Distância de simulação"))
+                .setTooltip(Text.literal("Até onde o servidor interno carrega e simula blocos, entidades e ticks, em chunks. "
+                        + "É independente da distância de renderização: podes desenhar 16 chunks e simular 5.\n\n"
+                        + "O que afeta: carga de CPU, ticks de mobs, fornos, crescimento de plantas, redstone e a memória "
+                        + "das chunks carregadas. Uma distância de simulação maior que a de renderização mantém vivo o que "
+                        + "não vês; menor alivia o CPU sem tirar paisagem.\n\n"
+                        + "Precisa de recarregar o renderizador."))
+                .setControl(option -> new SliderControl(option, 5, 32, 1, chunks()))
+                .setBinding((options, value) -> options.getSimulationDistance().setValue(value), options -> options.getSimulationDistance().getValue())
+                .setImpact(OptionImpact.HIGH)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Integer> brightness = OptionImpl.createBuilder(int.class, vanillaOpts)
+                .setName(Text.literal("Brilho"))
+                .setTooltip(Text.literal("Multiplica o brilho final da imagem — o gamma do jogo. Não altera a luz calculada "
+                        + "no mundo: só levanta o que já foi calculado, por isso não revela nada numa caverna sem luz, "
+                        + "apenas torna o escuro menos escuro.\n\n"
+                        + "O que afeta: só a cor final dos píxeis. Custo zero por frame. Vale no frame seguinte."))
+                .setControl(opt -> new SliderControl(opt, 0, 100, 1, brightness()))
+                .setBinding((opts, value) -> opts.getGamma().setValue(value * 0.01D), (opts) -> (int) (opts.getGamma().getValue() / 0.01D))
+                .build();
+
+        OptionGroup.Builder world = OptionGroup.createBuilder()
+                .setName(Text.literal("Mundo"));
+
+        // Iris slices general() between these two keys to insert its shadow-distance slider. The
+        // anchors keep the LDC constants in this method now that the visible text is Portuguese.
+        irisSliceAnchor("options.renderDistance");
+        world.add(viewDistance);
+        irisSliceAnchor("options.simulationDistance");
+        world.add(simulationDistance);
+        world.add(brightness);
+
+        groups.add(world.build());
 
         groups.add(OptionGroup.createBuilder()
                 .setName(Text.literal("Ecrã e ritmo"))
@@ -185,25 +212,32 @@ public class SodiumGameOptionPages {
     public static OptionPage quality() {
         List<OptionGroup> groups = new ArrayList<>();
 
-        groups.add(OptionGroup.createBuilder()
-                .setName(Text.literal("Modo de renderização"))
-                .add(OptionImpl.createBuilder(GraphicsMode.class, vanillaOpts)
-                        .setName(Text.literal("Gráficos"))
-                        .setTooltip(Text.literal("Modo de gráficos do vanilla. Serve de valor por omissão às opções que estiverem em "
-                                + "«Padrão»: com Rápido, folhas e precipitação resolvem para as versões opacas e próximas; "
-                                + "com Bom ou Fabuloso, para as versões completas.\n\n"
-                                + "Fabuloso acrescenta ainda o pipeline de framebuffers para translúcidos e nuvens, com várias "
-                                + "passagens a mais por frame.\n\n"
-                                + "O que afeta: um conjunto de opções de uma vez e a arquitetura do renderizador. Numa PowerVR, "
-                                + "Fabuloso multiplica o custo de cada frame. Precisa de recarregar o renderizador."))
-                        .setControl(option -> new CyclingControl<>(option, GraphicsMode.class, new Text[] { Text.literal("Rápido"), Text.literal("Bom"), Text.literal("Fabuloso") }))
-                        .setBinding(
-                                (opts, value) -> opts.getGraphicsMode().setValue(value),
-                                opts -> opts.getGraphicsMode().getValue())
-                        .setImpact(OptionImpact.HIGH)
-                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
-                        .build())
-                .build());
+        Option<GraphicsMode> graphics = OptionImpl.createBuilder(GraphicsMode.class, vanillaOpts)
+                .setName(Text.literal("Gráficos"))
+                .setTooltip(Text.literal("Modo de gráficos do vanilla. Serve de valor por omissão às opções que estiverem em "
+                        + "«Padrão»: com Rápido, folhas e precipitação resolvem para as versões opacas e próximas; "
+                        + "com Bom ou Fabuloso, para as versões completas.\n\n"
+                        + "Fabuloso acrescenta ainda o pipeline de framebuffers para translúcidos e nuvens, com várias "
+                        + "passagens a mais por frame.\n\n"
+                        + "O que afeta: um conjunto de opções de uma vez e a arquitetura do renderizador. Numa PowerVR, "
+                        + "Fabuloso multiplica o custo de cada frame. Precisa de recarregar o renderizador."))
+                .setControl(option -> new CyclingControl<>(option, GraphicsMode.class, new Text[] { Text.literal("Rápido"), Text.literal("Bom"), Text.literal("Fabuloso") }))
+                .setBinding(
+                        (opts, value) -> opts.getGraphicsMode().setValue(value),
+                        opts -> opts.getGraphicsMode().getValue())
+                .setImpact(OptionImpact.HIGH)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        OptionGroup.Builder mode = OptionGroup.createBuilder()
+                .setName(Text.literal("Modo de renderização"));
+
+        // Iris slices quality() between these two keys to replace the graphics option with its
+        // limited video-settings button and to append its color-space option.
+        irisSliceAnchor("options.graphics");
+        mode.add(graphics);
+        irisSliceAnchor("options.renderClouds");
+        groups.add(mode.build());
 
         groups.add(OptionGroup.createBuilder()
                 .setName(Text.literal("Ambiente"))
