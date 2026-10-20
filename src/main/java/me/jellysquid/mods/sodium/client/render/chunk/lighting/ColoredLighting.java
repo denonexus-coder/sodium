@@ -3,10 +3,10 @@ package me.jellysquid.mods.sodium.client.render.chunk.lighting;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightingPath;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.block.AbstractCandleBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.CandleBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.item.BlockItem;
@@ -51,70 +51,130 @@ public final class ColoredLighting {
     private static final int DIFFUSE_PASSES = 6;
     private static final float DIFFUSE_DECAY = 0.84F;
 
-    /** One block in the grid, emitted at full strength before diffusion. */
-    private static final float[] WARM = {1.00F, 0.68F, 0.22F};
-    private static final float[] NEUTRAL = {0.80F, 0.80F, 0.80F};
-    private static final float[] CANDLE = {1.00F, 0.60F, 0.20F};
+    /** The fallback for a light source that is not in the table below. */
+    private static final float[] NEUTRAL = rgb(0xCCCCCC);
+    /** Candles and candle cakes share the warm flame; the wax colour is not the emitted light. */
+    private static final float[] CANDLE = rgb(0xFFC46B);
 
+    /**
+     * Emission tints for the 1.20.1 light sources. The values are the visual colour of the light,
+     * not the vanilla lightmap: the game itself has a single warm block-light ramp. Entries that
+     * change with state (lit furnace, charged anchor, berries, pickles, candles) are keyed by block
+     * and filtered by {@link BlockState#getLuminance()} during the scan.
+     *
+     * <p>Candle wax colours are not used: the flame is the actual emitter, and it is warm for every
+     * wax variant. Stained glass is absent because it has no luminance; the beacon beam is drawn
+     * by the vanilla block entity renderer and is not part of this chunk-light grid.
+     */
     private static final Map<Block, float[]> COLORS = new HashMap<>();
 
     static {
-        float[] fire = {1.00F, 0.45F, 0.08F};
-        float[] torch = WARM;
-        float[] ochre = {1.00F, 0.85F, 0.35F};
-        float[] soul = {0.15F, 0.82F, 1.00F};
-        float[] aqua = {0.75F, 0.95F, 1.00F};
-        float[] verdant = {0.55F, 0.95F, 0.65F};
-        float[] pearl = {0.90F, 0.70F, 0.95F};
-        float[] redstone = {1.00F, 0.05F, 0.02F};
-        float[] magma = {0.90F, 0.25F, 0.05F};
-        float[] arcane = {0.70F, 0.20F, 0.95F};
-        float[] sculk = {0.00F, 0.70F, 0.75F};
-        float[] pickle = {0.30F, 0.85F, 0.55F};
-        float[] endRod = {0.95F, 0.95F, 1.00F};
+        float[] fire = rgb(0xFF7722);
+        float[] lava = rgb(0xFF8A1E);
+        float[] torch = rgb(0xFFB55E);
+        float[] campfire = rgb(0xFF9933);
+        float[] jack = rgb(0xFFBB55);
+        float[] magma = rgb(0xE0661F);
+        float[] glowstone = rgb(0xFFD98C);
+        float[] lantern = rgb(0xFFCB6B);
+        float[] redstoneLamp = rgb(0xFFB266);
+        float[] furnace = rgb(0xFF9D4D);
+        float[] brewing = rgb(0xFFCC66);
+        float[] seaLantern = rgb(0xCFE8F0);
+        float[] beacon = rgb(0xFFFFFF);
+        float[] endRod = rgb(0xF5EEE6);
+        float[] conduit = rgb(0x55DDE0);
+        float[] endPortal = rgb(0x2EE6C9);
+        float[] endGateway = rgb(0x33E0D0);
+        float[] endFrame = rgb(0x38C98A);
+        float[] enderChest = rgb(0x9B5FD0);
+        float[] seaPickle = rgb(0x8CE6B0);
+        float[] netherPortal = rgb(0xA040E0);
+        float[] cryingObsidian = rgb(0x7A3FD0);
+        float[] respawnAnchor = rgb(0xC040C0);
+        float[] dragonEgg = rgb(0x3A2050);
+        float[] soulFire = rgb(0x36E0E8);
+        float[] soulCampfire = rgb(0x3FE0E0);
+        float[] soulTorch = rgb(0x5AE0E8);
+        float[] shroomlight = rgb(0xFF9D5C);
+        float[] glowLichen = rgb(0x8FE0A0);
+        float[] caveVines = rgb(0xFFC45C);
+        float[] brownMushroom = rgb(0xC9B896);
+        float[] ochre = rgb(0xF7D94C);
+        float[] verdant = rgb(0xA6E05A);
+        float[] pearl = rgb(0xF0A6D0);
+        float[] redstoneTorch = rgb(0xFF4D4D);
+        float[] redstoneOre = rgb(0xFF5555);
+        float[] sculkCatalyst = rgb(0x1FA0A8);
+        float[] sculkSensor = rgb(0x2ABFCC);
+        float[] amethyst = rgb(0xC9A6F0);
+        float[] amethystMedium = rgb(0xBF9AEA);
+        float[] amethystSmall = rgb(0xB590E5);
 
-        COLORS.put(Blocks.LAVA, fire);
+        COLORS.put(Blocks.LAVA, lava);
+        COLORS.put(Blocks.LAVA_CAULDRON, lava);
         COLORS.put(Blocks.FIRE, fire);
-        COLORS.put(Blocks.SOUL_FIRE, soul);
+        COLORS.put(Blocks.SOUL_FIRE, soulFire);
         COLORS.put(Blocks.MAGMA_BLOCK, magma);
 
         COLORS.put(Blocks.TORCH, torch);
         COLORS.put(Blocks.WALL_TORCH, torch);
-        COLORS.put(Blocks.LANTERN, torch);
-        COLORS.put(Blocks.GLOWSTONE, torch);
-        COLORS.put(Blocks.SHROOMLIGHT, torch);
-        COLORS.put(Blocks.JACK_O_LANTERN, torch);
-        COLORS.put(Blocks.CAMPFIRE, torch);
+        COLORS.put(Blocks.CAMPFIRE, campfire);
+        COLORS.put(Blocks.JACK_O_LANTERN, jack);
+        COLORS.put(Blocks.GLOWSTONE, glowstone);
+        COLORS.put(Blocks.LANTERN, lantern);
+        COLORS.put(Blocks.REDSTONE_LAMP, redstoneLamp);
+        COLORS.put(Blocks.FURNACE, furnace);
+        COLORS.put(Blocks.BLAST_FURNACE, furnace);
+        COLORS.put(Blocks.SMOKER, furnace);
+        COLORS.put(Blocks.BREWING_STAND, brewing);
 
-        COLORS.put(Blocks.SOUL_TORCH, soul);
-        COLORS.put(Blocks.SOUL_WALL_TORCH, soul);
-        COLORS.put(Blocks.SOUL_LANTERN, soul);
-        COLORS.put(Blocks.SOUL_CAMPFIRE, soul);
-
-        COLORS.put(Blocks.SEA_LANTERN, aqua);
-        COLORS.put(Blocks.BEACON, aqua);
+        COLORS.put(Blocks.SEA_LANTERN, seaLantern);
+        COLORS.put(Blocks.BEACON, beacon);
         COLORS.put(Blocks.END_ROD, endRod);
+        COLORS.put(Blocks.LIGHT, beacon);
+
+        COLORS.put(Blocks.CONDUIT, conduit);
+        COLORS.put(Blocks.END_PORTAL, endPortal);
+        COLORS.put(Blocks.END_GATEWAY, endGateway);
+        COLORS.put(Blocks.END_PORTAL_FRAME, endFrame);
+        COLORS.put(Blocks.ENDER_CHEST, enderChest);
+        COLORS.put(Blocks.SEA_PICKLE, seaPickle);
+
+        COLORS.put(Blocks.NETHER_PORTAL, netherPortal);
+        COLORS.put(Blocks.CRYING_OBSIDIAN, cryingObsidian);
+        COLORS.put(Blocks.RESPAWN_ANCHOR, respawnAnchor);
+        COLORS.put(Blocks.DRAGON_EGG, dragonEgg);
+
+        COLORS.put(Blocks.SOUL_CAMPFIRE, soulCampfire);
+        COLORS.put(Blocks.SOUL_TORCH, soulTorch);
+        COLORS.put(Blocks.SOUL_WALL_TORCH, soulTorch);
+        COLORS.put(Blocks.SOUL_LANTERN, soulTorch);
+
+        COLORS.put(Blocks.SHROOMLIGHT, shroomlight);
+        COLORS.put(Blocks.GLOW_LICHEN, glowLichen);
+        COLORS.put(Blocks.CAVE_VINES, caveVines);
+        COLORS.put(Blocks.CAVE_VINES_PLANT, caveVines);
+        COLORS.put(Blocks.BROWN_MUSHROOM, brownMushroom);
 
         COLORS.put(Blocks.OCHRE_FROGLIGHT, ochre);
         COLORS.put(Blocks.VERDANT_FROGLIGHT, verdant);
         COLORS.put(Blocks.PEARLESCENT_FROGLIGHT, pearl);
 
-        COLORS.put(Blocks.REDSTONE_TORCH, redstone);
-        COLORS.put(Blocks.REDSTONE_WALL_TORCH, redstone);
+        COLORS.put(Blocks.REDSTONE_TORCH, redstoneTorch);
+        COLORS.put(Blocks.REDSTONE_WALL_TORCH, redstoneTorch);
+        COLORS.put(Blocks.REDSTONE_ORE, redstoneOre);
+        COLORS.put(Blocks.DEEPSLATE_REDSTONE_ORE, redstoneOre);
 
-        COLORS.put(Blocks.AMETHYST_CLUSTER, arcane);
-        COLORS.put(Blocks.LARGE_AMETHYST_BUD, arcane);
-        COLORS.put(Blocks.MEDIUM_AMETHYST_BUD, arcane);
-        COLORS.put(Blocks.SMALL_AMETHYST_BUD, arcane);
-        COLORS.put(Blocks.CRYING_OBSIDIAN, arcane);
-        COLORS.put(Blocks.RESPAWN_ANCHOR, arcane);
+        COLORS.put(Blocks.SCULK_CATALYST, sculkCatalyst);
+        COLORS.put(Blocks.SCULK_SENSOR, sculkSensor);
+        COLORS.put(Blocks.CALIBRATED_SCULK_SENSOR, sculkSensor);
+        COLORS.put(Blocks.SCULK_SHRIEKER, sculkSensor);
 
-        COLORS.put(Blocks.SCULK_SENSOR, sculk);
-        COLORS.put(Blocks.SCULK_CATALYST, sculk);
-        COLORS.put(Blocks.SCULK_SHRIEKER, sculk);
-        COLORS.put(Blocks.GLOW_LICHEN, sculk);
-
-        COLORS.put(Blocks.SEA_PICKLE, pickle);
+        COLORS.put(Blocks.AMETHYST_CLUSTER, amethyst);
+        COLORS.put(Blocks.LARGE_AMETHYST_BUD, amethyst);
+        COLORS.put(Blocks.MEDIUM_AMETHYST_BUD, amethystMedium);
+        COLORS.put(Blocks.SMALL_AMETHYST_BUD, amethystSmall);
     }
 
     private static final float[] GRID = new float[CELLS * 3];
@@ -431,11 +491,19 @@ public final class ColoredLighting {
         return 0.55F + (0.45F * luminance / 15.0F);
     }
 
+    private static float[] rgb(int hex) {
+        return new float[] {
+                ((hex >> 16) & 0xFF) / 255.0F,
+                ((hex >> 8) & 0xFF) / 255.0F,
+                (hex & 0xFF) / 255.0F
+        };
+    }
+
     private static float[] colorFor(Block block) {
         float[] color = COLORS.get(block);
 
         if (color == null) {
-            color = block instanceof CandleBlock ? CANDLE : NEUTRAL;
+            color = block instanceof AbstractCandleBlock ? CANDLE : NEUTRAL;
         }
 
         return color;
