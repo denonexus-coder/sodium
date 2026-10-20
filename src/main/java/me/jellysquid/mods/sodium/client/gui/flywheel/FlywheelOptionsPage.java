@@ -74,6 +74,7 @@ public final class FlywheelOptionsPage {
 				.build();
 
 		groups.add(OptionGroup.createBuilder()
+				.setName(Text.literal("Estado"))
 				.add(master)
 				.add(statusRow())
 				.build());
@@ -81,11 +82,13 @@ public final class FlywheelOptionsPage {
 		BooleanSupplier engine = master::getValue;
 
 		groups.add(OptionGroup.createBuilder()
+				.setName(Text.literal("Motor"))
 				.add(gated(workerThreadsOption(), engine))
 				.add(gated(limitUpdatesOption(), engine))
 				.build());
 
 		var instancingGroup = OptionGroup.createBuilder()
+				.setName(Text.literal("Instanciação"))
 				.add(gated(lightSmoothnessOption(), engine))
 				.add(gated(orphanUploadOption(), engine));
 
@@ -98,6 +101,7 @@ public final class FlywheelOptionsPage {
 		groups.add(instancingGroup.build());
 
 		groups.add(OptionGroup.createBuilder()
+				.setName(Text.literal("Efeitos"))
 				.add(gated(oitOption(), engine))
 				.add(gated(disableParticlesOption(), engine))
 				.add(gated(freezeGuiOption(), engine))

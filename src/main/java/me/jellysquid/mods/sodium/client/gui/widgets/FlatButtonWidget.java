@@ -21,6 +21,7 @@ public class FlatButtonWidget extends AbstractWidget implements Drawable {
     private @NotNull Style style = Style.defaults();
 
     private boolean selected;
+    private int selectedColor = 0xFF94E4D3;
     private boolean enabled = true;
     private boolean visible = true;
 
@@ -49,7 +50,7 @@ public class FlatButtonWidget extends AbstractWidget implements Drawable {
         this.drawString(drawContext, this.label, this.dim.getCenterX() - (strWidth / 2), this.dim.getCenterY() - 4, textColor);
 
         if (this.enabled && this.selected) {
-            this.drawRect(drawContext, this.dim.x(), this.dim.getLimitY() - 1, this.dim.getLimitX(), this.dim.getLimitY(), 0xFF94E4D3);
+            this.drawRect(drawContext, this.dim.x(), this.dim.getLimitY() - 1, this.dim.getLimitX(), this.dim.getLimitY(), this.selectedColor);
         }
         if (this.enabled && this.isFocused()) {
             this.drawBorder(drawContext, this.dim.x(), this.dim.y(), this.dim.getLimitX(), this.dim.getLimitY(), -1);
@@ -64,6 +65,13 @@ public class FlatButtonWidget extends AbstractWidget implements Drawable {
 
     public void setSelected(boolean selected) {
         this.selected = selected;
+    }
+
+    /**
+     * Colour of the one-pixel bar under a selected button. The options screen tints it per page.
+     */
+    public void setSelectedColor(int color) {
+        this.selectedColor = color;
     }
 
     @Override

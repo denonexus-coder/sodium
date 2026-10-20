@@ -44,6 +44,7 @@ public class SodiumGameOptionPages {
         List<OptionGroup> groups = new ArrayList<>();
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Mundo"))
                 .add(OptionImpl.createBuilder(int.class, vanillaOpts)
                         .setName(Text.literal("Distância de renderização"))
                         .setTooltip(Text.literal("Até onde o terreno é construído e desenhado, em chunks de 16×16. "
@@ -83,6 +84,7 @@ public class SodiumGameOptionPages {
                 .build());
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Ecrã e ritmo"))
                 .add(OptionImpl.createBuilder(int.class, vanillaOpts)
                         .setName(Text.literal("Escala da interface"))
                         .setTooltip(Text.literal("Tamanho do HUD e dos menus, em múltiplos. «Automático» escolhe o maior inteiro que "
@@ -149,6 +151,7 @@ public class SodiumGameOptionPages {
                 .build());
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Interface"))
                 .add(OptionImpl.createBuilder(boolean.class, vanillaOpts)
                         .setName(Text.literal("Balanço da câmara"))
                         .setTooltip(Text.literal("Faz a câmara oscilar ao andar. Puramente cosmético.\n\n"
@@ -182,6 +185,7 @@ public class SodiumGameOptionPages {
         List<OptionGroup> groups = new ArrayList<>();
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Modo de renderização"))
                 .add(OptionImpl.createBuilder(GraphicsMode.class, vanillaOpts)
                         .setName(Text.literal("Gráficos"))
                         .setTooltip(Text.literal("Modo de gráficos do vanilla. Serve de valor por omissão às opções que estiverem em "
@@ -201,6 +205,7 @@ public class SodiumGameOptionPages {
                 .build());
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Ambiente"))
                 .add(OptionImpl.createBuilder(CloudRenderMode.class, vanillaOpts)
                         .setName(Text.literal("Nuvens"))
                         .setTooltip(Text.literal("Desligadas: sem nuvens. Rápidas: uma camada plana. Bonitas: nuvens em 3D, com "
@@ -256,6 +261,10 @@ public class SodiumGameOptionPages {
                         .setBinding((opts, value) -> opts.getParticles().setValue(value), (opts) -> opts.getParticles().getValue())
                         .setImpact(OptionImpact.MEDIUM)
                         .build())
+                .build());
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Iluminação e entidades"))
                 .add(OptionImpl.createBuilder(boolean.class, vanillaOpts)
                         .setName(Text.literal("Oclusão ambiente"))
                         .setTooltip(Text.literal("Escurece os cantos entre blocos conforme os vizinhos, o que dá volume às formas. "
@@ -315,6 +324,7 @@ public class SodiumGameOptionPages {
 
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Texturas"))
                 .add(OptionImpl.createBuilder(int.class, vanillaOpts)
                         .setName(Text.literal("Mipmaps"))
                         .setTooltip(Text.literal("Número de níveis de mipmap gerados para as texturas de bloco; cada nível tem "
@@ -337,6 +347,7 @@ public class SodiumGameOptionPages {
         List<OptionGroup> groups = new ArrayList<>();
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Construção de chunks"))
                 .add(OptionImpl.createBuilder(int.class, sodiumOpts)
                         .setName(Text.literal("Threads de construção de chunks"))
                         .setTooltip(Text.literal("Quantas threads constroem e atualizam as malhas das chunks. 0 deixa o Sodium "
@@ -368,6 +379,7 @@ public class SodiumGameOptionPages {
         );
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Desenho"))
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Culling de faces por secção"))
                         .setTooltip(Text.literal("Para cada secção de 16×16×16, testa de que lado o plano da câmara está e submete "
@@ -454,6 +466,7 @@ public class SodiumGameOptionPages {
         List<OptionGroup> groups = new ArrayList<>();
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Transferências"))
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Mapeamento persistente"))
                         .setTooltip(Text.literal("Usa buffers de staging mapeados de forma persistente para enviar geometria de "
@@ -473,6 +486,7 @@ public class SodiumGameOptionPages {
                 .build());
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("CPU"))
                 .add(OptionImpl.createBuilder(int.class, sodiumOpts)
                         .setName(Text.literal("Frames em avanço no CPU"))
                         .setTooltip(Text.literal("Quantos frames podem estar em voo para a GPU antes de o CPU esperar. No início de "
@@ -492,6 +506,7 @@ public class SodiumGameOptionPages {
         // and its two knobs live here so it can be turned on from the game instead of from a
         // launcher's JVM arguments, which is not where a mod's options belong.
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Diagnóstico"))
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Registo de frames (Frame Trace)"))
                         .setTooltip(Text.literal("Grava, um registo por frame em sodium-trace.csv na pasta do jogo, o que o caminho "
@@ -558,6 +573,7 @@ public class SodiumGameOptionPages {
         List<OptionGroup> groups = new ArrayList<>();
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Céu e objetos"))
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Céu"))
                         .setTooltip(Text.literal("Desenha o céu da dimensão: o gradiente de fundo, o sol, a lua e as estrelas. "
@@ -598,6 +614,7 @@ public class SodiumGameOptionPages {
                 .build());
 
         groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Block entities"))
                 .add(OptionImpl.createBuilder(int.class, sodiumOpts)
                         .setName(Text.literal("Distância dos block entities"))
                         .setTooltip(Text.literal("Percentagem da distância de renderização até onde os block entities são desenhados. "

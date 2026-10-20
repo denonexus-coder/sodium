@@ -215,14 +215,14 @@ public final class VanillinOptionsPage {
 			blockEntities.add(visualOption(entry));
 		}
 
-		addGroup(groups, blockEntities);
+		addGroup(groups, blockEntities, Text.literal("Block entities"));
 
 		List<Option<?>> entities = new ArrayList<>();
 		for (VanillinCompat.Entry entry : VanillinCompat.entityEntries()) {
 			entities.add(visualOption(entry));
 		}
 
-		addGroup(groups, entities);
+		addGroup(groups, entities, Text.literal("Entidades"));
 
 		return new OptionPage(Text.literal("Vanillin"), ImmutableList.copyOf(groups));
 	}
@@ -231,12 +231,13 @@ public final class VanillinOptionsPage {
 	 * Wraps a list of options in a group, skipping it when empty. A group with no options renders
 	 * as a bare heading with nothing under it, which reads as a bug rather than as an absence.
 	 */
-	private static void addGroup(List<OptionGroup> groups, List<Option<?>> options) {
+	private static void addGroup(List<OptionGroup> groups, List<Option<?>> options, Text name) {
 		if (options.isEmpty()) {
 			return;
 		}
 
-		OptionGroup.Builder builder = OptionGroup.createBuilder();
+		OptionGroup.Builder builder = OptionGroup.createBuilder()
+				.setName(name);
 		for (Option<?> option : options) {
 			builder.add(option);
 		}
