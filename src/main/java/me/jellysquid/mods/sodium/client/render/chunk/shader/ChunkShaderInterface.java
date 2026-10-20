@@ -76,7 +76,9 @@ public class ChunkShaderInterface {
         this.bindTexture(ChunkShaderTextureSlot.LIGHT, TextureUtil.getLightTextureId());
 
         if (this.uniformColorLightTex != null) {
-            // Unit 2 is free: the block atlas is 0 and the lightmap is 1.
+            // Unit 2 is free: the block atlas is 0 and the lightmap is 1. The colored-light
+            // texture is a normal 2D atlas, so GlStateManager can bind it without the 3D-target
+            // trap that some GLES translation layers crash on.
             GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 2);
             GlStateManager._bindTexture(ColoredLighting.getTextureId());
             this.uniformColorLightTex.setInt(2);
@@ -98,6 +100,9 @@ public class ChunkShaderInterface {
             ColoredLighting.writeHandLight(cameraPos, this.handLight, this.handColor);
             this.uniformHandLight.set(this.handLight);
             this.uniformHandLightColor.set(this.handColor);
+
+            // Leave the texture unit in the state the next renderer expects.
+            GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
         }
 
         var textureAtlas = (SpriteAtlasTextureAccessor) MinecraftClient.getInstance()

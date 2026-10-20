@@ -1,5 +1,6 @@
 package me.jellysquid.mods.sodium.client.render.chunk.lighting;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightingPath;
 import net.fabricmc.loader.api.FabricLoader;
@@ -11,11 +12,14 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
+import org.lwjgl.opengl.GL13;
+import org.lwjgl.opengl.GL32C;
 
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
@@ -47,7 +51,9 @@ public final class ColoredLighting {
     public static final int SIZE_Z = 32;
 
     private static final int CELLS = SIZE_X * SIZE_Y * SIZE_Z;
-    private static final int REBUILD_INTERVAL = 20;
+    // Short enough that a newly placed source shows its colour almost immediately; the scan is
+    // only 32x16x32 cells, so four rebuilds per second are cheap.
+    private static final int REBUILD_INTERVAL = 5;
     private static final int DIFFUSE_PASSES = 6;
     private static final float DIFFUSE_DECAY = 0.84F;
 
@@ -304,11 +310,16 @@ public final class ColoredLighting {
             stack = client.player.getOffHandStack();
         }
 
-        if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) {
+        BlockState state;
+
+        if (stack.isOf(Items.LAVA_BUCKET)) {
+            // The bucket is not a BlockItem, but the lava it carries is a level-15 source.
+            state = Blocks.LAVA.getDefaultState();
+        } else if (stack.getItem() instanceof BlockItem blockItem) {
+            state = blockItem.getBlock().getDefaultState();
+        } else {
             return;
         }
-
-        BlockState state = blockItem.getBlock().getDefaultState();
 
         if (state.getLuminance() <= 0) {
             return;
@@ -322,7 +333,7 @@ public final class ColoredLighting {
         light[2] = (float) ((eye.z + look.z * 0.6D) - cameraPos.z);
         light[3] = lightStrength(state.getLuminance());
 
-        float[] blockColor = colorFor(blockItem.getBlock());
+        float[] blockColor = colorFor(state.getBlock());
         color[0] = blockColor[0];
         color[1] = blockColor[1];
         color[2] = blockColor[2];
@@ -375,7 +386,10 @@ public final class ColoredLighting {
                     }
 
                     float[] color = colorFor(state.getBlock());
-                    int index = ((y * SIZE_Z + z) * SIZE_X + x) * 3;
+                    // The 2D atlas is laid out x-fastest, then y for one Z slice, then the
+                    // next Z slice. Keep that order in the grid as well; swapping y and z here
+                    // used to put every source at the wrong world position.
+                    int index = ((z * SIZE_Y + y) * SIZE_X + x) * 3;
                     float strength = lightStrength(luminance);
 
                     GRID[index] = Math.max(GRID[index], color[0] * strength);
@@ -402,10 +416,10 @@ public final class ColoredLighting {
         for (int pass = 0; pass < DIFFUSE_PASSES; pass++) {
             System.arraycopy(GRID, 0, SCRATCH, 0, GRID.length);
 
-            for (int y = 0; y < SIZE_Y; y++) {
-                for (int z = 0; z < SIZE_Z; z++) {
+            for (int z = 0; z < SIZE_Z; z++) {
+                for (int y = 0; y < SIZE_Y; y++) {
                     for (int x = 0; x < SIZE_X; x++) {
-                        int index = ((y * SIZE_Z + z) * SIZE_X + x) * 3;
+                        int index = ((z * SIZE_Y + y) * SIZE_X + x) * 3;
 
                         if (x > 0) {
                             spread(index, index - 3);
@@ -414,16 +428,16 @@ public final class ColoredLighting {
                             spread(index, index + 3);
                         }
                         if (z > 0) {
-                            spread(index, index - SIZE_X * 3);
+                            spread(index, index - SIZE_X * SIZE_Y * 3);
                         }
                         if (z + 1 < SIZE_Z) {
-                            spread(index, index + SIZE_X * 3);
+                            spread(index, index + SIZE_X * SIZE_Y * 3);
                         }
                         if (y > 0) {
-                            spread(index, index - SIZE_X * SIZE_Z * 3);
+                            spread(index, index - SIZE_X * 3);
                         }
                         if (y + 1 < SIZE_Y) {
-                            spread(index, index + SIZE_X * SIZE_Z * 3);
+                            spread(index, index + SIZE_X * 3);
                         }
                     }
                 }
@@ -461,25 +475,40 @@ public final class ColoredLighting {
 
         buffer.flip();
 
-        GL11.glBindTexture(GL12.GL_TEXTURE_3D, textureId);
+        // The grid texture lives on unit 2. Bind it explicitly and restore the active unit:
+        // uploads happen from the client tick, not from the chunk shader setup, and leaking the
+        // grid texture onto unit 0/1 made unrelated rendering flicker.
+        int previousTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 2);
+        GlStateManager._bindTexture(textureId);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-        GL12.glTexSubImage3D(GL12.GL_TEXTURE_3D, 0, 0, 0, 0, SIZE_X, SIZE_Y, SIZE_Z,
+        GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, 0, 0, SIZE_X, SIZE_Y * SIZE_Z,
                 GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, buffer);
+        GlStateManager._activeTexture(previousTexture);
     }
 
     private static void createTexture() {
+        int previousTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 2);
+
         textureId = GL11.glGenTextures();
 
-        GL11.glBindTexture(GL12.GL_TEXTURE_3D, textureId);
-        GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
-        GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
-        GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
-        GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
-        GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL12.GL_TEXTURE_WRAP_R, GL12.GL_CLAMP_TO_EDGE);
-        GL12.glTexImage3D(GL12.GL_TEXTURE_3D, 0, GL11.GL_RGB8, SIZE_X, SIZE_Y, SIZE_Z, 0,
-                GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+        // A plain 2D atlas instead of a 3D texture. MobileGlues has a native crash in its
+        // glTexImage3D path on some devices; every GLES 3 driver handles a 2D RGB8 texture.
+        // Each Z slice is a block of SIZE_Y rows, so the row-major grid order
+        // ((z * SIZE_Y + y) * SIZE_X + x) is already the upload order.
+        GlStateManager._bindTexture(textureId);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
 
         uploadBuffer = BufferUtils.createByteBuffer(CELLS * 3);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
+        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGB8, SIZE_X, SIZE_Y * SIZE_Z, 0,
+                GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, uploadBuffer);
+
+        GlStateManager._activeTexture(previousTexture);
     }
 
     /**

@@ -64,5 +64,5 @@ void _vert_init() {
 }
 
 #else
-#error "Vertex compression must be enabled"
+#error Vertex compression must be enabled
 #endif

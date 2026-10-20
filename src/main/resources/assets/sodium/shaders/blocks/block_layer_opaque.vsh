@@ -24,7 +24,7 @@ uniform vec2 u_TexCoordShrink;
 uniform sampler2D u_LightTex; // The light map texture sampler
 
 #ifdef COLORED_LIGHTING
-uniform highp sampler3D u_ColorLightTex; // RGB of the light that reaches each grid cell
+uniform highp sampler2D u_ColorLightTex; // 2D atlas: X by (Y * Z) RGB cells
 uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
 uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
 
@@ -36,17 +36,38 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
     // only the sky column is sampled, and the block term comes from the colored grid.
     vec3 sky = texture(u_LightTex, vec2(0.0, lightCoord.y)).rgb;
 
-    vec3 gridPos = clamp((worldPos - u_ColorLightOrigin) * u_ColorLightScale, 0.0, 1.0);
-    vec3 colored = texture(u_ColorLightTex, gridPos).rgb;
+    vec3 gridCoord = (worldPos - u_ColorLightOrigin) * u_ColorLightScale;
+
+    // The grid is uploaded as a 2D atlas: X pixels across, then a block of Y rows for every Z
+    // slice. Sample two adjacent slices and interpolate them by hand. Sampling the atlas as a
+    // 3D texture is not an option here: MobileGlues crashes in glTexImage3D on some devices.
+    vec3 gridSize = 1.0 / u_ColorLightScale;
+    vec3 p = clamp(gridCoord, 0.0, 1.0) * gridSize;
+    float u = clamp(p.x, 0.5, gridSize.x - 0.5) / gridSize.x;
+    float y = clamp(p.y, 0.5, gridSize.y - 0.5);
+    float z0 = clamp(floor(p.z - 0.5), 0.0, gridSize.z - 1.0);
+    float z1 = min(z0 + 1.0, gridSize.z - 1.0);
+    float fz = fract(p.z - 0.5);
+    float v0 = (z0 * gridSize.y + y) / (gridSize.y * gridSize.z);
+    float v1 = (z1 * gridSize.y + y) / (gridSize.y * gridSize.z);
+    vec3 colored = mix(texture(u_ColorLightTex, vec2(u, v0)).rgb,
+                       texture(u_ColorLightTex, vec2(u, v1)).rgb, fz);
+
+    // Do not smear the border texel over every chunk outside the scanned volume. The grid only
+    // covers 32x16x32 blocks around the player; without this mask the clamped edge cell would
+    // colour the whole world, and would visibly flash whenever the grid was rebuilt.
+    vec3 edgeDist = min(gridCoord, vec3(1.0) - gridCoord);
+    float edge = min(min(edgeDist.x, edgeDist.y), edgeDist.z);
+    colored *= smoothstep(0.0, 0.08, edge);
 
     // The grid already carries the source colour multiplied by its strength. Multiplying it by
-    // lightCoord.x would apply the vanilla warm ramp a second time, which is why a placed source
-    // used to look duller than the same source in the hand. Keep the warm base only where the
-    // grid found no colour; the gain compensates for the grid's 0.84 per-block diffusion so the
-    // placed light fades at roughly the same rate as the hand light.
+    // lightCoord.x would apply the vanilla warm ramp a second time, and multiplying it by a gain
+    // would clip pale sources to white at the source cell. Keep the warm base only where the grid
+    // found no colour; the placed source then starts at exactly the hand colour and fades only
+    // through the grid's diffusion.
     vec3 warm = vec3(0.62, 0.50, 0.32) * lightCoord.x;
     float colorAmount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
-    vec3 block = mix(warm, colored * 1.50, colorAmount);
+    vec3 block = mix(warm, colored, colorAmount);
 
     if (u_HandLight.w > 0.0) {
         vec3 delta = worldPos - u_HandLight.xyz;

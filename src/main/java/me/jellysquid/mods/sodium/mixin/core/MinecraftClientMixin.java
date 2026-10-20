@@ -77,8 +77,8 @@ public class MinecraftClientMixin {
     }
 
     /**
-     * Rebuilds the colored-light grid every second, on the client thread, so the texture upload
-     * happens while the GL context is current. The chunk renderer only samples it.
+     * Rebuilds the colored-light grid a few times per second, on the client thread, so the
+     * texture upload happens while the GL context is current. The chunk renderer only samples it.
      */
     @Inject(method = "tick", at = @At("TAIL"))
     private void postTick(CallbackInfo ci) {

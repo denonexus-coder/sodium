@@ -692,8 +692,9 @@ public class SodiumGameOptionPages {
                                 + "driver, sem tradução. Os dois caminhos são opcionais e exclusivos: o controlo roda por "
                                 + "Desligado, GLSL e ESSL.\n\n"
                                 + "O que afeta: troca a rampa única do lightmap por uma grelha de 32x16x32 blocos à volta "
-                                + "do jogador, com a cor de cada fonte (tocha, alma, lava, ametista, sculk, frogluz). A "
-                                + "grelha é refeita a cada segundo e enviada como textura 3D; nenhum chunk é reconstruído. "
+                                + "do jogador, com a cor de cada fonte (tocha, alma, lava, portais, ametista, sculk, "
+                                + "frogluz, velas e outras). A grelha é refeita várias vezes por segundo e enviada como "
+                                + "textura 2D em atlas; nenhum chunk é reconstruído. "
                                 + "Com um shaderpack do Iris ativo fica desligado, porque o Iris substitui o shader do "
                                 + "Sodium. Aplicar recarrega o renderizador." + irisNote))
                         .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.LightingPath.class, new Text[] {
