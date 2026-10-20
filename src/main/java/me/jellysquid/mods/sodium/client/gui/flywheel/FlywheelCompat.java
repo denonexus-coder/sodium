@@ -37,6 +37,7 @@ public final class FlywheelCompat {
 	private static final Field MOBILE_DISABLE_PARTICLES;
 	private static final Field MOBILE_FREEZE_GUI_ITEM_ANIMATION;
 	private static final Field MOBILE_ORPHAN_UPLOADS;
+	private static final Field MOBILE_HIDE_OFFSCREEN;
 	@Nullable
 	private static final Field MOBILE_DRIVER;
 
@@ -51,6 +52,7 @@ public final class FlywheelCompat {
 	private static final Field CONFIG_DISABLE_PARTICLES;
 	private static final Field CONFIG_FREEZE_GUI_ITEM_ANIMATION;
 	private static final Field CONFIG_ORPHAN_UPLOADS;
+	private static final Field CONFIG_HIDE_OFFSCREEN;
 	private static final Field CONFIG_BACKEND_CONFIG;
 	private static final Field BACKEND_CONFIG_LIGHT_SMOOTHNESS;
 
@@ -67,6 +69,7 @@ public final class FlywheelCompat {
 		Field mobileDisableParticles = null;
 		Field mobileFreezeGuiItemAnimation = null;
 		Field mobileOrphanUploads = null;
+		Field mobileHideOffscreen = null;
 		Field mobileDriver = null;
 		Object config = null;
 		Field configUseDefaultBackend = null;
@@ -77,6 +80,7 @@ public final class FlywheelCompat {
 		Field configDisableParticles = null;
 		Field configFreezeGuiItemAnimation = null;
 		Field configOrphanUploads = null;
+		Field configHideOffscreen = null;
 		Field configBackendConfig = null;
 		Field backendConfigLightSmoothness = null;
 		Method configSave = null;
@@ -94,6 +98,7 @@ public final class FlywheelCompat {
 			mobileDisableParticles = staticField(mobileOptions, "disableParticles");
 			mobileFreezeGuiItemAnimation = staticField(mobileOptions, "freezeGuiItemAnimation");
 			mobileOrphanUploads = staticField(mobileOptions, "orphanInstanceUpload");
+			mobileHideOffscreen = staticField(mobileOptions, "hideOffscreenInstances");
 			mobileDriver = staticField(mobileOptions, "mobileDriver");
 
 			Field instance = staticField(fabricConfig, "INSTANCE");
@@ -105,6 +110,7 @@ public final class FlywheelCompat {
 			configDisableParticles = staticField(fabricConfig, "disableParticles");
 			configFreezeGuiItemAnimation = staticField(fabricConfig, "freezeGuiItemAnimation");
 			configOrphanUploads = staticField(fabricConfig, "orphanInstanceUpload");
+			configHideOffscreen = staticField(fabricConfig, "hideOffscreenInstances");
 			configBackendConfig = staticField(fabricConfig, "backendConfig");
 
 			if (configBackendConfig != null) {
@@ -172,6 +178,7 @@ public final class FlywheelCompat {
 		MOBILE_DISABLE_PARTICLES = mobileDisableParticles;
 		MOBILE_FREEZE_GUI_ITEM_ANIMATION = mobileFreezeGuiItemAnimation;
 		MOBILE_ORPHAN_UPLOADS = mobileOrphanUploads;
+		MOBILE_HIDE_OFFSCREEN = mobileHideOffscreen;
 		MOBILE_DRIVER = mobileDriver;
 		CONFIG = config;
 		CONFIG_USE_DEFAULT_BACKEND = configUseDefaultBackend;
@@ -182,6 +189,7 @@ public final class FlywheelCompat {
 		CONFIG_DISABLE_PARTICLES = configDisableParticles;
 		CONFIG_FREEZE_GUI_ITEM_ANIMATION = configFreezeGuiItemAnimation;
 		CONFIG_ORPHAN_UPLOADS = configOrphanUploads;
+		CONFIG_HIDE_OFFSCREEN = configHideOffscreen;
 		CONFIG_BACKEND_CONFIG = configBackendConfig;
 		BACKEND_CONFIG_LIGHT_SMOOTHNESS = backendConfigLightSmoothness;
 		CONFIG_SAVE = configSave;
@@ -383,6 +391,34 @@ public final class FlywheelCompat {
 	public static void orphanInstanceUpload(boolean value) {
 		writeConfigAndMobile(CONFIG_ORPHAN_UPLOADS, MOBILE_ORPHAN_UPLOADS, value);
 	}
+	/**
+	 * Whether this Flywheel build knows about off-screen instance hiding.
+	 *
+	 * <p>Deliberately optional rather than part of the {@link #PRESENT} gate. The flag was added
+	 * after the rest of the page, so a Sodium build carrying this option may be run against a
+	 * Flywheel that does not have it; folding it into {@code PRESENT} would take the entire page
+	 * away rather than just the one row, which is a far worse failure than a missing switch.
+	 */
+	public static boolean hasHideOffscreen() {
+		return MOBILE_HIDE_OFFSCREEN != null && CONFIG_HIDE_OFFSCREEN != null;
+	}
+
+	/**
+	 * Hide instances outside the view frustum by pulling them out of the instancer, so they cost
+	 * no draw call and are left out of the per-frame rewrite of the instance array.
+	 *
+	 * <p>The instancing backend has no culling of its own - frustum culling lives behind the
+	 * indirect backend, which needs compute shaders and so cannot run through a translation
+	 * layer. Without this, every instance is submitted whether or not it is behind the camera.
+	 */
+	public static boolean hideOffscreenInstances() {
+		return readStatic(MOBILE_HIDE_OFFSCREEN, true);
+	}
+
+	public static void hideOffscreenInstances(boolean value) {
+		writeConfigAndMobile(CONFIG_HIDE_OFFSCREEN, MOBILE_HIDE_OFFSCREEN, value);
+	}
+
 
 	// ---------------------------------------------------------------- persist
 

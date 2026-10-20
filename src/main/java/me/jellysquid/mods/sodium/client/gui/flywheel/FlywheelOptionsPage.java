@@ -76,10 +76,17 @@ public final class FlywheelOptionsPage {
 				.add(gated(limitUpdatesOption(), engine))
 				.build());
 
-		groups.add(OptionGroup.createBuilder()
+		var instancingGroup = OptionGroup.createBuilder()
 				.add(gated(lightSmoothnessOption(), engine))
-				.add(gated(orphanUploadOption(), engine))
-				.build());
+				.add(gated(orphanUploadOption(), engine));
+
+		// Only when this Flywheel build carries the flag. The rest of the page works against
+		// older builds, so the row is simply left out rather than shown doing nothing.
+		if (FlywheelCompat.hasHideOffscreen()) {
+			instancingGroup.add(gated(hideOffscreenOption(), engine));
+		}
+
+		groups.add(instancingGroup.build());
 
 		groups.add(OptionGroup.createBuilder()
 				.add(gated(oitOption(), engine))
@@ -167,6 +174,29 @@ public final class FlywheelOptionsPage {
 				.setImpact(OptionImpact.HIGH)
 				.setBinding((data, value) -> FlywheelCompat.orphanInstanceUpload(value),
 						data -> FlywheelCompat.orphanInstanceUpload())
+				.build();
+	}
+
+	/**
+	 * Hide instances outside the view frustum so they are pulled out of the instancer instead of
+	 * merely having their transform left un-written.
+	 *
+	 * <p>The distinction is the whole point of the switch. The visuals have always tested the
+	 * frustum, but all that ever did was skip a matrix update, which leaves the instance in the
+	 * draw: it still costs a slot in every instanced call and still gets rewritten into the
+	 * instance array each frame. Hiding it removes it from the instancer outright.
+	 *
+	 * <p>No reload flag: the frustum is tested again every frame, so an instance revealed by
+	 * turning this off comes back on the next frame of a running world.
+	 */
+	private static Option<Boolean> hideOffscreenOption() {
+		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
+				.setName(Text.translatable("sodium.options.flywheel.hide_offscreen.name"))
+				.setTooltip(Text.translatable("sodium.options.flywheel.hide_offscreen.tooltip"))
+				.setControl(TickBoxControl::new)
+				.setImpact(OptionImpact.HIGH)
+				.setBinding((data, value) -> FlywheelCompat.hideOffscreenInstances(value),
+						data -> FlywheelCompat.hideOffscreenInstances())
 				.build();
 	}
 
