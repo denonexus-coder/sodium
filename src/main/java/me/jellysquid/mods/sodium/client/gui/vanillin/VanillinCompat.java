@@ -288,10 +288,11 @@ public final class VanillinCompat {
 	/**
 	 * Push the in-memory config into Vanillin's visualizer registry.
 	 *
-	 * <p>Vanillin applies this once at startup, so the page calls it again on Apply. What it
-	 * changes is which visualizer a <em>future</em> visual will be built with; an object already
-	 * visualised keeps the one it has until the world reloads, which is why the options carry a
-	 * restart flag rather than pretending to apply on the spot.
+	 * <p>Vanillin applies this once at startup, so the page calls it again on Apply. On its own it
+	 * only changes which visualizer a <em>future</em> visual will be built with: an object already
+	 * visualised keeps the one it has, while {@code skipVanillaRender} reads the registry live, so
+	 * the two would disagree until the visuals are rebuilt. The caller owns that rebuild --
+	 * {@code VanillinOptionsStorage} follows this with a renderer reload.
 	 */
 	public static void apply() {
 		if (CONFIG == null || CONFIG_APPLY == null || CONFIGURATOR == null) {

@@ -7,7 +7,6 @@ import java.util.Map;
 import com.google.common.collect.ImmutableList;
 
 import me.jellysquid.mods.sodium.client.gui.options.Option;
-import me.jellysquid.mods.sodium.client.gui.options.OptionFlag;
 import me.jellysquid.mods.sodium.client.gui.options.OptionGroup;
 import me.jellysquid.mods.sodium.client.gui.options.OptionImpact;
 import me.jellysquid.mods.sodium.client.gui.options.OptionImpl;
@@ -31,10 +30,10 @@ import org.jetbrains.annotations.Nullable;
  * down the vanilla path exactly as if Vanillin were not installed. {@code Force enable} installs
  * one even where a mod has asked Vanillin to leave that object alone.
  *
- * <p>Every option carries {@link OptionFlag#REQUIRES_GAME_RESTART}, because Vanillin builds its
- * visualizer registry once during mod startup. Apply does push the new state into the registry so
- * objects visualised afterwards pick it up, but an object already on screen keeps the visual it
- * has until the world reloads, and saying so is more useful than implying the change is complete.
+ * <p>Apply pushes the new state into the registry and then reloads the renderer, which rebuilds
+ * every visual from it: the chunk sections are recompiled, and each one re-adds the block entities
+ * it contains, while the fresh visualization manager re-adds the entities from the level. The
+ * change therefore lands in-game, at the cost of a chunk rebuild rather than a restart.
  *
  * <p>The names and descriptions are literal Portuguese keyed by registry name, with the
  * registry-derived label as the fallback for a visual another mod registered. Each description
@@ -254,7 +253,7 @@ public final class VanillinOptionsPage {
 				.setName(Text.literal("Visuais do Vanillin"))
 				.setTooltip(Text.literal(
 						"Liga e desliga cada visual registado pelo Vanillin. Cada linha é um tipo de objeto e "
-								+ "a escolha é escrita no vanillin.json ao aplicar.\n\n"
+								+ "Aplicar instala a escolha no registo vivo e grava-a no vanillin.json.\n\n"
 								+ "Padrão: o Vanillin decide — estáveis ligados, experimentais desligados fora de "
 								+ "um ambiente de desenvolvimento.\n"
 								+ "Vanilla: remove o visualizador; o objeto volta ao renderizador vanilla, como se o "
@@ -263,10 +262,10 @@ public final class VanillinOptionsPage {
 								+ "fazer.\n\n"
 								+ "O que afeta: quem desenha o objeto. Geometria, animação e luz passam a ser do "
 								+ "Flywheel.\n\n"
-								+ "Porque reiniciar: o registo de visualizadores é instalado uma vez, no arranque, e "
-								+ "consultado em todos os frames. Mudá-lo a meio da sessão faria o objeto ser "
-								+ "desenhado duas vezes ao desligar, ou nenhuma ao ligar. Por isso Aplicar só "
-								+ "escreve o ficheiro, e a escolha vale no arranque seguinte."))
+								+ "O que o Aplicar faz: instala a escolha no registo de visualizadores e recarrega o "
+								+ "renderizador. O mundo reconstrói as secções de chunk, e é isso que recria os "
+								+ "visuais com a escolha nova — sem sair do jogo. Custa alguns segundos de chunks a "
+								+ "reconstruir, e é esse o preço de não reiniciar."))
 				.setControl(TickBoxControl::new)
 				.setEnabled(false)
 				.setBinding((data, value) -> {
@@ -296,9 +295,6 @@ public final class VanillinOptionsPage {
 				.setImpact(OptionImpact.MEDIUM)
 				.setBinding((data, value) -> VanillinCompat.set(entry, value),
 						data -> VanillinCompat.get(entry))
-				// Vanillin builds its registry at startup, and an object already visualised keeps
-				// its visual until the world reloads.
-				.setFlags(OptionFlag.REQUIRES_GAME_RESTART)
 				.build();
 	}
 
@@ -311,11 +307,11 @@ public final class VanillinOptionsPage {
 		String description = info != null ? info.description() : FALLBACK_DESCRIPTION;
 
 		String state = entry.enabledByDefault()
-				? "\n\nEstado «Padrão»: ligado — o Vanillin traz este visual como estável. A mudança vale no "
-						+ "arranque seguinte."
+				? "\n\nEstado «Padrão»: ligado — o Vanillin traz este visual como estável. Aplicar "
+						+ "reconstrói os visuais que já estão no ecrã."
 				: "\n\nEstado «Padrão»: desligado — o Vanillin traz este visual como experimental fora "
-						+ "de desenvolvimento. Escolhe «Forçar instância» para o ligar. A mudança vale no "
-						+ "arranque seguinte.";
+						+ "de desenvolvimento. Escolhe «Forçar instância» para o ligar. Aplicar reconstrói "
+						+ "os visuais que já estão no ecrã.";
 
 		return Text.literal(description + state + "\n\n" + entry.key());
 	}
