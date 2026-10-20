@@ -431,8 +431,8 @@ public class SodiumGameOptionPages {
                                 + "O que afeta: o custo de CPU por chamada OpenGL, sobretudo quando há muitas chamadas pequenas. "
                                 + "O preço é que um erro deixa de ser reportado e passa a produzir corrupção silenciosa, o que "
                                 + "torna qualquer diagnóstico muito mais difícil.\n\n"
-                                + "Só aparece quando o driver suporta a extensão. O contexto é criado no arranque, por isso "
-                                + "precisa de reiniciar o jogo."))
+                                + "Só aparece quando o driver suporta GL_KHR_no_error ou OpenGL 4.6. O contexto é "
+                                + "criado no arranque, por isso precisa de reiniciar o jogo."))
                         .setControl(TickBoxControl::new)
                         .setImpact(OptionImpact.LOW)
                         .setBinding((opts, value) -> opts.performance.useNoErrorGLContext = value, opts -> opts.performance.useNoErrorGLContext)
