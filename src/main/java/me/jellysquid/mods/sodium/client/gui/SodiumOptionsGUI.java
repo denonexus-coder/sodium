@@ -27,7 +27,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Language;
 import net.minecraft.util.Util;
-import net.minecraft.util.math.Mth;
+import net.minecraft.util.math.MathHelper;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
@@ -259,7 +259,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         int contentRight = this.width - 8;
 
         if (this.detailVisible) {
-            this.detailW = Mth.clamp(this.width / 5, 156, 220);
+            this.detailW = MathHelper.clamp(this.width / 5, 156, 220);
             this.detailX = this.width - 6 - this.detailW;
             this.detailY = 30;
             this.detailH = Math.max(60, this.height - this.detailY - 42);
@@ -319,7 +319,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         }
 
         this.contentMaxScroll = Math.max(0, total - this.contentH);
-        this.contentScroll = Mth.clamp(this.contentScroll, 0, this.contentMaxScroll);
+        this.contentScroll = MathHelper.clamp(this.contentScroll, 0, this.contentMaxScroll);
 
         int offset = 0;
 
@@ -528,7 +528,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         int textHeight = lines.size() * 10;
 
         this.detailMaxScroll = Math.max(0, textHeight - viewHeight);
-        this.detailScroll = Mth.clamp(this.detailScroll, 0, this.detailMaxScroll);
+        this.detailScroll = MathHelper.clamp(this.detailScroll, 0, this.detailMaxScroll);
 
         if (viewHeight > 0) {
             drawContext.enableScissor(this.detailX + 1, viewTop, this.detailX + this.detailW, viewBottom);
@@ -576,7 +576,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
         if (this.detailVisible && this.detailMaxScroll > 0
                 && this.isInside(mouseX, mouseY, this.detailX, this.detailY, this.detailW, this.detailH)) {
-            int next = Mth.clamp(this.detailScroll - (int) (amount * 14), 0, this.detailMaxScroll);
+            int next = MathHelper.clamp(this.detailScroll - (int) (amount * 14), 0, this.detailMaxScroll);
 
             if (next != this.detailScroll) {
                 this.detailScroll = next;
@@ -586,7 +586,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         }
 
         if (this.isInside(mouseX, mouseY, this.contentX, this.contentY, this.contentW, this.contentH)) {
-            int next = Mth.clamp(this.contentScroll - (int) (amount * (ROW_HEIGHT * 2)), 0, this.contentMaxScroll);
+            int next = MathHelper.clamp(this.contentScroll - (int) (amount * (ROW_HEIGHT * 2)), 0, this.contentMaxScroll);
 
             if (next != this.contentScroll) {
                 this.contentScroll = next;
@@ -605,7 +605,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (this.draggingDetail) {
             if (this.detailMaxScroll > 0) {
-                this.detailScroll = Mth.clamp(this.dragDetailStartScroll - (int) (mouseY - this.dragDetailStartY), 0, this.detailMaxScroll);
+                this.detailScroll = MathHelper.clamp(this.dragDetailStartScroll - (int) (mouseY - this.dragDetailStartY), 0, this.detailMaxScroll);
             }
 
             return true;
@@ -613,7 +613,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
 
         if (this.draggingContent) {
             if (this.contentMaxScroll > 0) {
-                int next = Mth.clamp(this.dragStartScroll - (int) (mouseY - this.dragStartY), 0, this.contentMaxScroll);
+                int next = MathHelper.clamp(this.dragStartScroll - (int) (mouseY - this.dragStartY), 0, this.contentMaxScroll);
 
                 if (next != this.contentScroll) {
                     this.contentScroll = next;
