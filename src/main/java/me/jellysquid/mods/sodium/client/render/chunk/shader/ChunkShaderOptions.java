@@ -6,6 +6,10 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexTy
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType) {
     public ShaderConstants constants() {
+        return this.constants(false);
+    }
+
+    public ShaderConstants constants(boolean coloredLighting) {
         ShaderConstants.Builder constants = ShaderConstants.builder();
         constants.addAll(this.fog.getDefines());
 
@@ -14,6 +18,10 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         }
 
         constants.add("USE_VERTEX_COMPRESSION"); // TODO: allow compact vertex format to be disabled
+
+        if (coloredLighting) {
+            constants.add("COLORED_LIGHTING");
+        }
 
         return constants.build();
     }

@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gui.screen.ConfigCorruptedScreen;
 import me.jellysquid.mods.sodium.client.compatibility.checks.ResourcePackScanner;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.RunArgs;
 import net.minecraft.client.realms.RealmsClient;
@@ -73,6 +74,15 @@ public class MinecraftClientMixin {
         }
 
         this.fences.enqueue(fence);
+    }
+
+    /**
+     * Rebuilds the colored-light grid every second, on the client thread, so the texture upload
+     * happens while the GL context is current. The chunk renderer only samples it.
+     */
+    @Inject(method = "tick", at = @At("TAIL"))
+    private void postTick(CallbackInfo ci) {
+        ColoredLighting.tick();
     }
 
     /**

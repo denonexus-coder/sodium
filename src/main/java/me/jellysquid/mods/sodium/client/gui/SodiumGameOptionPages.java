@@ -11,6 +11,7 @@ import me.jellysquid.mods.sodium.client.gui.options.control.SliderControl;
 import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
 import me.jellysquid.mods.sodium.client.gui.options.storage.MinecraftOptionsStorage;
 import me.jellysquid.mods.sodium.client.gui.options.storage.SodiumOptionsStorage;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds;
 import net.minecraft.client.MinecraftClient;
@@ -634,6 +635,62 @@ public class SodiumGameOptionPages {
                 .build());
 
         return new OptionPage(Text.literal("Visual"), ImmutableList.copyOf(groups));
+    }
+
+    /**
+     * The colored-lighting page. It is separate from Visual because it is a replacement of the
+     * light model, not a toggle of one object, and because both paths are experimental: the ESSL
+     * file is handed to the driver as-is, so a driver that disagrees with it fails the shader, not
+     * the option.
+     */
+    public static OptionPage experimental() {
+        List<OptionGroup> groups = new ArrayList<>();
+        boolean iris = ColoredLighting.isIrisShaderPackInUse();
+        String irisNote = iris ? "\n\nO Iris está a usar um shaderpack: as opções ficam desligadas até o desativares." : "";
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Iluminação colorida"))
+                .add(OptionImpl.createBuilder(SodiumGameOptions.LightingPath.class, sodiumOpts)
+                        .setName(Text.literal("Sistema"))
+                        .setTooltip(Text.literal("Desligado desenha com o shader normal do Sodium. GLSL entrega ao MobileGlues um "
+                                + "shader GLSL 330, que ele traduz para ESSL antes de o passar ao driver. ESSL entrega "
+                                + "#version 320 es, que o MobileGlues reconhece como já traduzido e manda tal e qual ao "
+                                + "driver, sem tradução. Os dois caminhos são opcionais e exclusivos: o controlo roda por "
+                                + "Desligado, GLSL e ESSL.\n\n"
+                                + "O que afeta: troca a rampa única do lightmap por uma grelha de 32x16x32 blocos à volta "
+                                + "do jogador, com a cor de cada fonte (tocha, alma, lava, ametista, sculk, frogluz). A "
+                                + "grelha é refeita a cada segundo e enviada como textura 3D; nenhum chunk é reconstruído. "
+                                + "Com um shaderpack do Iris ativo fica desligado, porque o Iris substitui o shader do "
+                                + "Sodium. Aplicar recarrega o renderizador." + irisNote))
+                        .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.LightingPath.class, new Text[] {
+                                Text.literal("Desligado"), Text.literal("GLSL (MobileGlues)"), Text.literal("ESSL (direto)") }))
+                        .setBinding((opts, value) -> {
+                            if (opts.experimental.lighting != value) {
+                                ColoredLighting.resetShaderFailure();
+                            }
+                            opts.experimental.lighting = value;
+                        }, opts -> opts.experimental.lighting == null ? SodiumGameOptions.LightingPath.OFF : opts.experimental.lighting)
+                        .setImpact(OptionImpact.MEDIUM)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                        .setEnabled(!iris)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Luz na mão"))
+                        .setTooltip(Text.literal("Soma a luz do bloco que o jogador segura na mão principal (ou na secundária, se a "
+                                + "principal estiver vazia). A posição é a dos olhos, ligeiramente à frente; a atenuação é "
+                                + "quadrática até 12 blocos e não usa a normal da face, porque o formato de vértice do "
+                                + "Sodium não a transporta.\n\n"
+                                + "O que afeta: poucas instruções por vértice e um uniform por frame. Só aparece quando o "
+                                + "item segurado emite luz (tocha, lanterna, glowstone, lava). É independente do caminho "
+                                + "GLSL/ESSL: com o sistema Desligado não faz nada."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> opts.experimental.handLight = value, opts -> opts.experimental.handLight)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!iris)
+                        .build())
+                .build());
+
+        return new OptionPage(Text.literal("Experimental"), ImmutableList.copyOf(groups));
     }
 
     /**

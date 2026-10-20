@@ -51,7 +51,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private static final int SECTION_HEIGHT = 16;
     private static final int GROUP_GAP = 6;
     private static final int[] PAGE_ACCENTS = {
-            0xFF4FC3F7, 0xFF8AD97B, 0xFFFFC15E, 0xFFB7A4F5, 0xFF63D8D2, 0xFFFF8FA3, 0xFFFFB067
+            0xFF4FC3F7, 0xFF8AD97B, 0xFFFFC15E, 0xFFFF7BCB, 0xFFB7A4F5, 0xFF63D8D2, 0xFFFF8FA3, 0xFFFFB067
     };
     private static final FlatButtonWidget.Style RAIL_BUTTON_STYLE = createRailButtonStyle();
 
@@ -102,6 +102,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.pages.add(SodiumGameOptionPages.general());
         this.pages.add(SodiumGameOptionPages.quality());
         this.pages.add(SodiumGameOptionPages.visual());
+        this.pages.add(SodiumGameOptionPages.experimental());
         this.pages.add(SodiumGameOptionPages.performance());
         this.pages.add(SodiumGameOptionPages.advanced());
 
@@ -250,7 +251,8 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private void computeLayout() {
         boolean compact = this.width < 560;
 
-        this.railWidth = compact ? 76 : 82;
+        // "Experimental" is the longest tab label; the rail has to fit it at both sizes.
+        this.railWidth = compact ? 88 : 92;
         this.detailVisible = this.width >= 600;
 
         this.contentX = this.railWidth + 8;

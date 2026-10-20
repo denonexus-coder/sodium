@@ -25,6 +25,7 @@ public class SodiumGameOptions {
     public final AdvancedSettings advanced = new AdvancedSettings();
     public final PerformanceSettings performance = new PerformanceSettings();
     public final VisualSettings visual = new VisualSettings();
+    public final ExperimentalSettings experimental = new ExperimentalSettings();
     public final NotificationSettings notifications = new NotificationSettings();
 
     private boolean readOnly;
@@ -83,6 +84,30 @@ public class SodiumGameOptions {
 
         /** Percentage of the render distance kept for block entities. 100 means "no limit of our own". */
         public int blockEntityDistance = 100;
+    }
+
+    /**
+     * The colored-lighting instrument. It is separate from {@link VisualSettings} because it does
+     * not change what the vanilla renderer draws: it replaces the light that the chunk shader
+     * applies, and it only exists when the user turns one of the two paths on.
+     *
+     * <p>The path is an enum instead of two booleans so that the two systems can never run at the
+     * same time; the GUI exposes it as one control with three states.
+     */
+    public static class ExperimentalSettings {
+        public LightingPath lighting = LightingPath.OFF;
+
+        /** Adds the light of the held block to the chunk shader; costs a few ALU per vertex. */
+        public boolean handLight = true;
+    }
+
+    public enum LightingPath {
+        /** The chunk shader is the normal Sodium one; no colored light is computed. */
+        OFF,
+        /** Desktop GLSL 330; MobileGlues translates it to ESSL before the driver sees it. */
+        GLSL,
+        /** ESSL 320; MobileGlues hands it to the driver without translating it. */
+        ESSL
     }
 
     public static class NotificationSettings {

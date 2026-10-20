@@ -50,7 +50,9 @@ vec2 _get_texcoord_bias() {
 }
 
 void _vert_init() {
-    _vert_position = (_deinterleave_u20x3(a_Position) * VERTEX_SCALE) + VERTEX_OFFSET;
+    // ESSL has no implicit conversion from a uint vector to a float vector; the explicit cast is
+    // also valid in desktop GLSL, so both shader paths can share this file.
+    _vert_position = (vec3(_deinterleave_u20x3(a_Position)) * VERTEX_SCALE) + VERTEX_OFFSET;
     _vert_color = a_Color;
     _vert_tex_diffuse_coord = _get_texcoord();
     _vert_tex_diffuse_coord_bias = _get_texcoord_bias();
