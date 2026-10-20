@@ -59,7 +59,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private @Nullable ScreenPrompt prompt;
 
     private SodiumOptionsGUI(Screen prevScreen) {
-        super(Text.literal("Sodium Renderer Settings"));
+        super(Text.literal("Configurações do Sodium"));
 
         this.prevScreen = prevScreen;
 
@@ -183,10 +183,10 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.rebuildGUIPages();
         this.rebuildGUIOptions();
 
-        this.undoButton = new FlatButtonWidget(new Dim2i(this.width - 211, this.height - 30, 65, 20), Text.translatable("sodium.options.buttons.undo"), this::undoChanges);
-        this.applyButton = new FlatButtonWidget(new Dim2i(this.width - 142, this.height - 30, 65, 20), Text.translatable("sodium.options.buttons.apply"), this::applyChanges);
+        this.undoButton = new FlatButtonWidget(new Dim2i(this.width - 211, this.height - 30, 65, 20), Text.literal("Anular"), this::undoChanges);
+        this.applyButton = new FlatButtonWidget(new Dim2i(this.width - 142, this.height - 30, 65, 20), Text.literal("Aplicar"), this::applyChanges);
         this.closeButton = new FlatButtonWidget(new Dim2i(this.width - 73, this.height - 30, 65, 20), Text.translatable("gui.done"), this::close);
-        this.donateButton = new FlatButtonWidget(new Dim2i(this.width - 128, 6, 100, 20), Text.translatable("sodium.options.buttons.donate"), this::openDonationPage);
+        this.donateButton = new FlatButtonWidget(new Dim2i(this.width - 128, 6, 100, 20), Text.literal("Oferecer um café"), this::openDonationPage);
         this.hideDonateButton = new FlatButtonWidget(new Dim2i(this.width - 26, 6, 20, 20), Text.literal("x"), this::hideDonationButton);
 
         if (SodiumClientMod.options().notifications.hasClearedDonationButton) {
@@ -311,6 +311,21 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         return this.controls.stream();
     }
 
+    /**
+     * The impact suffix in Portuguese. The enum's own names come from translation keys, which fall
+     * back to English, so the suffix is spelled out here instead of appended in the caller.
+     */
+    private static Text impactLabel(OptionImpact impact) {
+        String value = switch (impact) {
+            case LOW -> "baixo";
+            case MEDIUM -> "médio";
+            case HIGH -> "alto";
+            case VARIES -> "varia";
+        };
+
+        return Text.literal("Impacto no desempenho: " + value).formatted(Formatting.GRAY);
+    }
+
     private void renderOptionTooltip(DrawContext drawContext, ControlElement<?> element) {
         Dim2i dim = element.getDimensions();
 
@@ -328,7 +343,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         OptionImpact impact = option.getImpact();
 
         if (impact != null) {
-            tooltip.add(Language.getInstance().reorder(Text.translatable("sodium.options.performance_impact_string", impact.getLocalizedName()).formatted(Formatting.GRAY)));
+            tooltip.add(Language.getInstance().reorder(impactLabel(impact)));
         }
 
         int boxHeight = (tooltip.size() * 12) + boxPadding;

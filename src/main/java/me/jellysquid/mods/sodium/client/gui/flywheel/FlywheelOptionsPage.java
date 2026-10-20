@@ -21,21 +21,21 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Flywheel's configuration, as a page of Sodium's options screen.
  *
- * <p>The whole of {@code flywheel.json} is reachable from here rather than from an editor: the
- * master switch, the instancing knobs, the transparency switches and the shader settings, each with
- * the effect it actually has written into its tooltip.
+ * <p>The whole of {@code flywheel.json} is reachable from here: the master switch, the two engine
+ * knobs, the three instancing knobs and the three effect switches. Each row says what the value
+ * changes inside the engine and what it costs, rather than restating its own name.
  *
  * <p>Everything below the master switch is wrapped in a {@link GatedOption} whose gate reads the
  * master's current, not yet applied value. That is what makes the page react while it is still
  * being edited: untick Flywheel and the rest of the page greys out immediately, before Apply is
  * pressed, and tick it again and everything comes back with the choices it had.
  *
- * <p>The flags on each option are not decoration. They are set from where the value is read in the
- * backend: an option consulted while the renderer rebuilds carries
- * {@link OptionFlag#REQUIRES_RENDERER_RELOAD}, one read per frame or per particle carries nothing
- * and simply starts working, and one whose worker pool is created once for the life of the process
- * carries {@link OptionFlag#REQUIRES_GAME_RESTART}, because applying it would otherwise look like
- * it did nothing.
+ * <p>The flags are set from where the value is read in the backend, not by taste. An option
+ * consulted while the engine is built carries {@link OptionFlag#REQUIRES_RENDERER_RELOAD}; one read
+ * per frame, per upload or per particle carries nothing and starts working on the next frame; one
+ * whose worker pool is created once for the life of the process carries
+ * {@link OptionFlag#REQUIRES_GAME_RESTART}, because applying it would otherwise look like it did
+ * nothing.
  */
 public final class FlywheelOptionsPage {
 	private FlywheelOptionsPage() {
@@ -56,8 +56,17 @@ public final class FlywheelOptionsPage {
 		// Built first because every other row asks it whether it is on. getValue() is the value
 		// currently shown on screen, not the applied one, so the gating follows the user's edit.
 		Option<Boolean> master = OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.enabled.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.enabled.tooltip"))
+				.setName(Text.literal("Flywheel ligado"))
+				.setTooltip(Text.literal(
+						"Liga o motor de instanciação. Cada tipo de objeto que o Vanillin instancia — baús, "
+								+ "sinos, camas, pistões, itens, carrinhos, displays — passa a ser escrito num "
+								+ "buffer de instâncias e desenhado numa chamada por modelo, em vez de uma por "
+								+ "objeto.\n\n"
+								+ "O que afeta: geometria, animação e luz desses objetos. O renderizador vanilla "
+								+ "do mesmo objeto deixa de correr, para não desenhar duas vezes.\n\n"
+								+ "Desligar escreve flywheel:off no flywheel.json e devolve tudo ao caminho "
+								+ "vanilla, com uma chamada de desenho por objeto. O backend é escolhido quando "
+								+ "o motor é construído, por isso precisa de recarregar o renderizador."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.HIGH)
 				.setBinding((data, value) -> FlywheelCompat.enabled(value), data -> FlywheelCompat.enabled())
@@ -94,7 +103,7 @@ public final class FlywheelOptionsPage {
 				.add(gated(freezeGuiOption(), engine))
 				.build());
 
-		return new OptionPage(Text.translatable("sodium.options.pages.flywheel"), ImmutableList.copyOf(groups));
+		return new OptionPage(Text.literal("Flywheel"), ImmutableList.copyOf(groups));
 	}
 
 	// ------------------------------------------------------------------ engine
@@ -106,15 +115,22 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<Integer> workerThreadsOption() {
 		return OptionImpl.createBuilder(int.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.worker_threads.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.worker_threads.tooltip"))
+				.setName(Text.literal("Threads de compilação de shaders"))
+				.setTooltip(Text.literal(
+						"Quantas threads pré-compilam os shaders da instanciação. São compilados uma vez, no "
+								+ "arranque e quando o tipo de luz muda, não a cada frame.\n\n"
+								+ "−1: o Flywheel escolhe. 0: compila na thread de render — o jogo congela "
+								+ "durante a compilação, mas não há contenção. N: usa N threads; termina mais "
+								+ "depressa, mas compete com a construção de chunks e com o render.\n\n"
+								+ "O que afeta: só o tempo e o pico de CPU do arranque, não o custo por frame. O "
+								+ "pool é criado uma vez por processo, por isso só vale no arranque seguinte."))
 				.setControl(option -> new SliderControl(option, FlywheelCompat.workerThreadsMin(),
 						FlywheelCompat.workerThreadsMax(), 1, value -> {
 							if (value < 0) {
-								return Text.translatable("sodium.options.flywheel.worker_threads.value.auto");
+								return Text.literal("Automático");
 							}
 							if (value == 0) {
-								return Text.translatable("sodium.options.flywheel.worker_threads.value.off");
+								return Text.literal("Thread de render");
 							}
 							return Text.literal(Integer.toString(value));
 						}))
@@ -130,8 +146,17 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<Boolean> limitUpdatesOption() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.limit_updates.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.limit_updates.tooltip"))
+				.setName(Text.literal("Limitar atualizações à distância"))
+				.setTooltip(Text.literal(
+						"Objetos longe da câmara deixam de ser atualizados em todos os frames: entram num "
+								+ "escalonamento por bandas, cada banda um subconjunto de frames escolhido por um "
+								+ "número primo. Quanto mais longe, menor a fração de frames em que são visitados.\n\n"
+								+ "O que afeta: o custo por frame de um campo denso de block entities, que é quase "
+								+ "todo atualização de matriz e não desenho. O que está perto continua a atualizar "
+								+ "sempre.\n\n"
+								+ "Efeito visível: animações distantes (tampa a abrir, item a rodar) podem andar a "
+								+ "um ritmo menor. Num objeto estático não se nota. Precisa de recarregar o "
+								+ "renderizador."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.MEDIUM)
 				.setBinding((data, value) -> FlywheelCompat.limitUpdates(value), data -> FlywheelCompat.limitUpdates())
@@ -147,13 +172,23 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<FlywheelLightSmoothness> lightSmoothnessOption() {
 		return OptionImpl.createBuilder(FlywheelLightSmoothness.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.light_smoothness.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.light_smoothness.tooltip"))
+				.setName(Text.literal("Suavidade da luz"))
+				.setTooltip(Text.literal(
+						"Como a luz é lida dentro de cada face. É uma constante de compilação, por isso cada "
+								+ "valor recompila os pipelines.\n\n"
+								+ "Plano: um valor por bloco, sem interpolação. O mais barato, e vê-se o degrau.\n\n"
+								+ "Trilinear: interpola as 8 esquinas à volta do fragmento. Suaviza os degraus, mas "
+								+ "não calcula oclusão ambiente — o AO fica a 1.\n\n"
+								+ "Suave: lê a vizinhança 3×3×3 e reproduz o cálculo de luz e AO do Minecraft. O "
+								+ "mais fiel e o mais caro.\n\n"
+								+ "Suave + face interior: igual, mais a correção das faces viradas para dentro de um "
+								+ "canto, que sem ela apanham a luz da face errada.\n\n"
+								+ "O que afeta: só a cor final dos fragmentos instanciados, não a luz das chunks."))
 				.setControl(option -> new CyclingControl<>(option, FlywheelLightSmoothness.class, new Text[]{
-						Text.translatable("sodium.options.flywheel.light_smoothness.flat"),
-						Text.translatable("sodium.options.flywheel.light_smoothness.tri_linear"),
-						Text.translatable("sodium.options.flywheel.light_smoothness.smooth"),
-						Text.translatable("sodium.options.flywheel.light_smoothness.smooth_inner_face_corrected"),
+						Text.literal("Plano"),
+						Text.literal("Trilinear"),
+						Text.literal("Suave"),
+						Text.literal("Suave + face interior"),
 				}))
 				.setImpact(OptionImpact.HIGH)
 				.setBinding((data, value) -> FlywheelCompat.lightSmoothness(value.name()),
@@ -168,8 +203,18 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<Boolean> orphanUploadOption() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.orphan_upload.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.orphan_upload.tooltip"))
+				.setName(Text.literal("Upload orfanado de instâncias"))
+				.setTooltip(Text.literal(
+						"Em vez de escrever por cima do buffer que a GPU pode ainda estar a ler "
+								+ "(glBufferSubData), aloca um buffer novo com o array inteiro (glBufferData) e "
+								+ "deixa o antigo retirar-se em segundo plano.\n\n"
+								+ "Porquê: uma escrita por cima numa região em leitura tem de ser ordenada contra "
+								+ "ela. Num GPU tile-based o driver resolve isso drenando a fila, e o CPU fica "
+								+ "parado à espera da GPU. A realocação evita a espera.\n\n"
+								+ "Só quando o driver é móvel e o buffer não precisa de crescer. Medido nesta GPU "
+								+ "(PowerVR GE8320, 2500 instâncias): ~0,6 ms por frame, contra 2,0–3,0 ms com "
+								+ "atualização parcial. Custo: reescreve o array inteiro.\n\n"
+								+ "É lido em cada upload, por isso vale no frame seguinte."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.HIGH)
 				.setBinding((data, value) -> FlywheelCompat.orphanInstanceUpload(value),
@@ -191,8 +236,18 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<Boolean> hideOffscreenOption() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.hide_offscreen.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.hide_offscreen.tooltip"))
+				.setName(Text.literal("Esconder instâncias fora do ecrã"))
+				.setTooltip(Text.literal(
+						"Fora do frustum, a instância passa a Hidden e sai do instancer, em vez de ficar no "
+								+ "desenho com a matriz por escrever.\n\n"
+								+ "A diferença é o que se poupa: um teste que só evita a escrita da matriz continua "
+								+ "a ocupar um slot em cada chamada instanciada e continua a ser reescrito no array "
+								+ "em todos os frames. Escondida não custa nem uma coisa nem outra, e sai do "
+								+ "trabalho de animação.\n\n"
+								+ "O que afeta: só o que está fora do campo de visão; o que está à frente fica igual. "
+								+ "A decisão é reconciliada a cada frame, por isso uma instância escondida por "
+								+ "engano volta assim que o frustum a incluir.\n\n"
+								+ "Vale no frame seguinte."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.HIGH)
 				.setBinding((data, value) -> FlywheelCompat.hideOffscreenInstances(value),
@@ -208,8 +263,17 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<Boolean> oitOption() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.oit.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.oit.tooltip"))
+				.setName(Text.literal("Transparência independente da ordem (OIT)"))
+				.setTooltip(Text.literal(
+						"Desenha os translúcidos instanciados sem depender da ordem: guarda as contribuições "
+								+ "num framebuffer e resolve-as no fim.\n\n"
+								+ "O que afeta: objetos instanciados com material translúcido. Sem isto, dois que "
+								+ "se cruzam podem ficar com a mistura errada, e o erro muda conforme a câmara "
+								+ "roda.\n\n"
+								+ "Custo: um framebuffer a mais e uma passagem de resolução por frame. Numa GPU "
+								+ "tile-based isso pesa em largura de banda. Desligar poupa essa largura ao preço "
+								+ "dos artefactos.\n\n"
+								+ "O framebuffer pertence ao renderizador, por isso precisa de recarregar."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.HIGH)
 				.setBinding((data, value) -> FlywheelCompat.oit(value), data -> FlywheelCompat.oit())
@@ -219,8 +283,16 @@ public final class FlywheelOptionsPage {
 
 	private static Option<Boolean> disableParticlesOption() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.disable_particles.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.disable_particles.tooltip"))
+				.setName(Text.literal("Desativar todas as partículas"))
+				.setTooltip(Text.literal(
+						"Corta as partículas no momento em que são criadas: o ponto de corte é "
+								+ "ParticleEngine.add, o funil por onde passa toda a partícula, do jogo e de "
+								+ "outros mods.\n\n"
+								+ "O que afeta: fumo, fogo, brasas, poção, explosões, blocos quebrados, rastos — "
+								+ "tudo. Poupa a simulação de cada partícula e o overdraw, que num telemóvel é "
+								+ "caro com fumo ou chuva no ecrã.\n\n"
+								+ "O custo é perder o feedback visual: não se vê um bloco a arder nem uma poção a "
+								+ "fazer efeito. É a opção mais agressiva da página. Vale no frame seguinte."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.MEDIUM)
 				.setBinding((data, value) -> FlywheelCompat.disableParticles(value),
@@ -230,8 +302,14 @@ public final class FlywheelOptionsPage {
 
 	private static Option<Boolean> freezeGuiOption() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.freeze_gui.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.freeze_gui.tooltip"))
+				.setName(Text.literal("Congelar animação dos atlas com um menu aberto"))
+				.setTooltip(Text.literal(
+						"Com um ecrã aberto (inventário, opções, baú), a animação dos atlas pára de avançar e "
+								+ "de reenviar frames para a GPU.\n\n"
+								+ "O que afeta: todas as texturas animadas, não só os itens do inventário — a água "
+								+ "e o fogo atrás do menu também param. Com o mundo à vista nada muda.\n\n"
+								+ "Porque poupa: cada frame animado é um upload de textura, e com um menu aberto o "
+								+ "mundo não é o foco. Vale no frame seguinte."))
 				.setControl(TickBoxControl::new)
 				.setImpact(OptionImpact.LOW)
 				.setBinding((data, value) -> FlywheelCompat.freezeGuiItemAnimation(value),
@@ -248,8 +326,15 @@ public final class FlywheelOptionsPage {
 	 */
 	private static Option<Boolean> statusRow() {
 		return OptionImpl.createBuilder(boolean.class, FlywheelOptionsStorage.INSTANCE)
-				.setName(Text.translatable("sodium.options.flywheel.mobile_driver.name"))
-				.setTooltip(Text.translatable("sodium.options.flywheel.mobile_driver.tooltip"))
+				.setName(Text.literal("Driver móvel detetado"))
+				.setTooltip(Text.literal(
+						"Informativo, não é um interruptor: é lido das strings do OpenGL uma vez, no "
+								+ "arranque.\n\n"
+								+ "É verdadeiro quando o driver se identifica como móvel ou como camada de "
+								+ "tradução — neste dispositivo, MobileGlues sobre PowerVR — e é isso que liga os "
+								+ "caminhos que só existem para GPUs tile-based, como o upload orfanado.\n\n"
+								+ "Se estiver falso num dispositivo que devia ser móvel, o Flywheel está a tomar os "
+								+ "caminhos de desktop e as opções móveis não têm efeito."))
 				.setControl(TickBoxControl::new)
 				.setEnabled(false)
 				.setBinding((data, value) -> {
