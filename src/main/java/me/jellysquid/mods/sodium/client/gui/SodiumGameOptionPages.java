@@ -549,6 +549,77 @@ public class SodiumGameOptionPages {
     }
 
     /**
+     * Rows that do not make Sodium faster, but let the player stop paying for things they do not
+     * need. They exist because the alternative was another mod doing the same with its own mixins
+     * and its own screen; keeping them here means one config file and one place to read what each
+     * switch actually changes.
+     */
+    public static OptionPage visual() {
+        List<OptionGroup> groups = new ArrayList<>();
+
+        groups.add(OptionGroup.createBuilder()
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Céu"))
+                        .setTooltip(Text.literal("Desenha o céu da dimensão: o gradiente de fundo, o sol, a lua e as estrelas. "
+                                + "Desligado, a passagem do céu é saltada inteira e o horizonte mostra a cor de fundo da "
+                                + "dimensão, que é a mesma que a névoa usa.\n\n"
+                                + "O que afeta: poucos quads por fotograma, por isso o ganho é pequeno; só compensa quando a "
+                                + "câmara passa muito tempo a olhar para o horizonte, ou quando o limite já é o preenchimento. "
+                                + "As nuvens são uma opção separada e continuam a ser desenhadas. Não altera a luz do mundo "
+                                + "nem o ciclo do dia."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> opts.visual.sky = value, opts -> opts.visual.sky)
+                        .setImpact(OptionImpact.LOW)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Feixes de beacon"))
+                        .setTooltip(Text.literal("Não desenha o cilindro de luz do beacon. O bloco, o vidro colorido e os efeitos "
+                                + "continuam iguais: quem calcula o feixe e aplica os efeitos é o servidor, o cliente só desenha "
+                                + "a coluna translúcida.\n\n"
+                                + "O que afeta: cada feixe é um cilindro alto, translúcido, desenhado com mistura e sem escrever "
+                                + "profundidade; é preenchimento e sobreposição puros. Numa base com muitos beacons o custo "
+                                + "soma-se, e desligar remove-o por completo. Perdes a referência visual de onde estão os "
+                                + "beacons, nada mais."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> opts.visual.beaconBeams = value, opts -> opts.visual.beaconBeams)
+                        .setImpact(OptionImpact.LOW)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Livro da mesa de encantamento"))
+                        .setTooltip(Text.literal("Não desenha o livro aberto que flutua sobre a mesa de encantamento. A mesa, a "
+                                + "interface e o encantamento continuam a funcionar.\n\n"
+                                + "O que afeta: um modelo pequeno e animado por mesa, redesenhado em cada fotograma. O ganho só "
+                                + "se nota em salas com muitas mesas, como as de mercadores de livros. É seguro porque o livro "
+                                + "não mostra nada que a interface já não diga."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> opts.visual.enchantingTableBook = value, opts -> opts.visual.enchantingTableBook)
+                        .setImpact(OptionImpact.LOW)
+                        .build())
+                .build());
+
+        groups.add(OptionGroup.createBuilder()
+                .add(OptionImpl.createBuilder(int.class, sodiumOpts)
+                        .setName(Text.literal("Distância dos block entities"))
+                        .setTooltip(Text.literal("Percentagem da distância de renderização até onde os block entities são desenhados. "
+                                + "A 100% desenha tudo o que a distância de renderização alcança; a 50% desenha só até metade "
+                                + "dela (por exemplo, 8 chunks numa distância de 16).\n\n"
+                                + "O que afeta: o modelo animado que é desenhado por cima do bloco. Baús, camas, placas, banners, "
+                                + "shulkers e crânios têm o modelo todo nesse renderizador e desaparecem; o feixe do beacon e o "
+                                + "livro da mesa perdem só o acrescento. O bloco continua a existir e a funcionar; ao "
+                                + "aproximares-te, volta a aparecer.\n\n"
+                                + "Objetos desenhados pelo Vanillin (camas, fogueiras, pistões e molduras experimentais) não passam "
+                                + "por aqui e continuam visíveis. Custa uma atualização do renderizador ao aplicar."))
+                        .setControl(option -> new SliderControl(option, 25, 100, 5, value -> Text.literal(value + "%")))
+                        .setBinding((opts, value) -> opts.visual.blockEntityDistance = value, opts -> opts.visual.blockEntityDistance)
+                        .setImpact(OptionImpact.MEDIUM)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_UPDATE)
+                        .build())
+                .build());
+
+        return new OptionPage(Text.literal("Visual"), ImmutableList.copyOf(groups));
+    }
+
+    /**
      * Pushes the three Frame Trace switches into the instrument. Each binding writes its own field
      * first, so re-reading all three here keeps the others where they were and the change lands
      * without a restart.

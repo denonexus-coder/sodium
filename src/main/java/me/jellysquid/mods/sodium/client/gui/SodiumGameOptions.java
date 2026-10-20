@@ -24,6 +24,7 @@ public class SodiumGameOptions {
     public final QualitySettings quality = new QualitySettings();
     public final AdvancedSettings advanced = new AdvancedSettings();
     public final PerformanceSettings performance = new PerformanceSettings();
+    public final VisualSettings visual = new VisualSettings();
     public final NotificationSettings notifications = new NotificationSettings();
 
     private boolean readOnly;
@@ -66,6 +67,22 @@ public class SodiumGameOptions {
         public GraphicsQuality leavesQuality = GraphicsQuality.DEFAULT;
 
         public boolean enableVignette = true;
+    }
+
+    /**
+     * Rendering that Sodium cannot speed up but that the player may want to switch off.
+     *
+     * <p>Every field here is a pure client-side choice: the server still simulates the same
+     * world, so hiding something never changes gameplay. The defaults keep vanilla behaviour,
+     * which means a config file written before this section existed loads with everything on.
+     */
+    public static class VisualSettings {
+        public boolean sky = true;
+        public boolean beaconBeams = true;
+        public boolean enchantingTableBook = true;
+
+        /** Percentage of the render distance kept for block entities. 100 means "no limit of our own". */
+        public int blockEntityDistance = 100;
     }
 
     public static class NotificationSettings {
