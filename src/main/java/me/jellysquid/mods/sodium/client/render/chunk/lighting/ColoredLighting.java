@@ -260,7 +260,7 @@ public final class ColoredLighting {
         light[0] = (float) ((eye.x + look.x * 0.6D) - cameraPos.x);
         light[1] = (float) ((eye.y + look.y * 0.6D) - cameraPos.y);
         light[2] = (float) ((eye.z + look.z * 0.6D) - cameraPos.z);
-        light[3] = 1.0F;
+        light[3] = lightStrength(state.getLuminance());
 
         float[] blockColor = colorFor(blockItem.getBlock());
         color[0] = blockColor[0];
@@ -316,7 +316,7 @@ public final class ColoredLighting {
 
                     float[] color = colorFor(state.getBlock());
                     int index = ((y * SIZE_Z + z) * SIZE_X + x) * 3;
-                    float strength = 0.55F + (0.45F * luminance / 15.0F);
+                    float strength = lightStrength(luminance);
 
                     GRID[index] = Math.max(GRID[index], color[0] * strength);
                     GRID[index + 1] = Math.max(GRID[index + 1], color[1] * strength);
@@ -420,6 +420,15 @@ public final class ColoredLighting {
                 GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
 
         uploadBuffer = BufferUtils.createByteBuffer(CELLS * 3);
+    }
+
+    /**
+     * The same peak intensity for a block in the hand and for the same block placed in the world.
+     * Luminance is the only property both paths can agree on: the hand has no block state, and the
+     * grid has no item stack.
+     */
+    private static float lightStrength(int luminance) {
+        return 0.55F + (0.45F * luminance / 15.0F);
     }
 
     private static float[] colorFor(Block block) {

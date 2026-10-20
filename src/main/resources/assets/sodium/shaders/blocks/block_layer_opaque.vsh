@@ -39,10 +39,14 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
     vec3 gridPos = clamp((worldPos - u_ColorLightOrigin) * u_ColorLightScale, 0.0, 1.0);
     vec3 colored = texture(u_ColorLightTex, gridPos).rgb;
 
-    // A warm base keeps an area with no scanned source at the brightness the vanilla lightmap
-    // would give it; the grid only adds the hue of the sources that were found. The colored term
-    // is stronger than the base so a soul lantern reads as cyan instead of orange-grey.
-    vec3 block = (vec3(0.62, 0.50, 0.32) + colored * 1.80) * lightCoord.x;
+    // The grid already carries the source colour multiplied by its strength. Multiplying it by
+    // lightCoord.x would apply the vanilla warm ramp a second time, which is why a placed source
+    // used to look duller than the same source in the hand. Keep the warm base only where the
+    // grid found no colour; the gain compensates for the grid's 0.84 per-block diffusion so the
+    // placed light fades at roughly the same rate as the hand light.
+    vec3 warm = vec3(0.62, 0.50, 0.32) * lightCoord.x;
+    float colorAmount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
+    vec3 block = mix(warm, colored * 1.50, colorAmount);
 
     if (u_HandLight.w > 0.0) {
         vec3 delta = worldPos - u_HandLight.xyz;
