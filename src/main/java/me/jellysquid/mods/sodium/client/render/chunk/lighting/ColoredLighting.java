@@ -754,24 +754,23 @@ public final class ColoredLighting {
                         continue;
                     }
 
-                    var container = section.getBlockStateContainer();
-
                     int baseX = chunkX << 4;
                     int baseY = sectionY << 4;
                     int baseZ = chunkZ << 4;
 
-                    // PalettedContainer index order: x in the low bits, then z, then y.
+                    // ChunkSection index order: x in the low bits, then z, then y.
                     for (int i = 0; i < 4096; i++) {
-                        BlockState state = container.get(i);
+                        int x = i & 15;
+                        int z = (i >> 4) & 15;
+                        int y = (i >> 8) & 15;
+
+                        BlockState state = section.getBlockState(x, y, z);
 
                         if (state.getLuminance() <= 0) {
                             continue;
                         }
 
-                        consumer.accept(state,
-                                baseX + (i & 15),
-                                baseY + ((i >> 8) & 15),
-                                baseZ + ((i >> 4) & 15));
+                        consumer.accept(state, baseX + x, baseY + y, baseZ + z);
                     }
                 }
             }
