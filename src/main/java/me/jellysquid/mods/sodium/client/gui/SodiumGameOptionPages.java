@@ -716,7 +716,7 @@ public class SodiumGameOptionPages {
                                 + "andas 8 blocos ou um bloco muda; o shader lê uma cor por posição. É o modo "
                                 + "antigo, agora ancorado ao mundo (deixa de piscar).\n\n"
                                 + "Analítico: não usa textura nenhuma. O jogo mantém uma lista das luzes mais "
-                                + "próximas (até 24, ou menos se o driver tiver poucos uniforms) e o shader soma "
+                                + "próximas (até 32, ou 24/16 se o driver tiver poucos uniforms) e o shader soma "
                                 + "cada uma com a mesma curva quadrática de 12 blocos da luz na mão. O chão fica "
                                 + "com exatamente a mesma intensidade e cor da mão, e não há upload, logo não há "
                                 + "piscar possível. As luzes fora do alcance da lista ficam com a rampa quente "

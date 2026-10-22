@@ -234,6 +234,7 @@ public final class ColoredLighting {
 
     private static int anchorX, anchorY, anchorZ;
     private static boolean hasAnchor;
+    private static ClientWorld gridWorld;
     private static boolean gridDirty = true;
     private static int ticksSinceGridRebuild;
 
@@ -443,6 +444,7 @@ public final class ColoredLighting {
         ticksSinceGridRebuild++;
 
         boolean moved = !hasAnchor
+                || client.world != gridWorld
                 || Math.abs(center.getX() - anchorX) > ANCHOR_DISTANCE
                 || Math.abs(center.getY() - anchorY) > ANCHOR_DISTANCE
                 || Math.abs(center.getZ() - anchorZ) > ANCHOR_DISTANCE;
@@ -463,20 +465,27 @@ public final class ColoredLighting {
 
         gridDirty = false;
         ticksSinceGridRebuild = 0;
-        hasAnchor = true;
-        anchorX = center.getX();
-        anchorY = center.getY();
-        anchorZ = center.getZ();
 
-        rebuildGrid(client.world, center);
+        // Keep the origin fixed between anchor crossings. Recentering on every block update
+        // resampled the same field at a shifted phase, which was the remaining source of shimmer
+        // while walking and placing torches.
+        if (moved || !hasAnchor) {
+            hasAnchor = true;
+            gridWorld = client.world;
+            anchorX = center.getX();
+            anchorY = center.getY();
+            anchorZ = center.getZ();
+        }
+
+        rebuildGrid(client.world, anchorX, anchorY, anchorZ);
     }
 
     // ---- Grid rebuild ---------------------------------------------------------------------
 
-    private static void rebuildGrid(ClientWorld world, BlockPos center) {
-        int ox = center.getX() - SIZE_X / 2;
-        int oy = center.getY() - SIZE_Y / 2;
-        int oz = center.getZ() - SIZE_Z / 2;
+    private static void rebuildGrid(ClientWorld world, int centerX, int centerY, int centerZ) {
+        int ox = centerX - SIZE_X / 2;
+        int oy = centerY - SIZE_Y / 2;
+        int oz = centerZ - SIZE_Z / 2;
 
         Arrays.fill(GRID, 0.0F);
         sourceCount = 0;

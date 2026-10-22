@@ -31,6 +31,13 @@ public final class AnalyticLighting {
     /** Rebuild when the camera moves further than this from the anchor. */
     private static final int ANCHOR_DISTANCE = 8;
 
+    /**
+     * Floor between two block-triggered rebuilds, matching the grid engine. Block updates arrive
+     * in bursts while building or during redstone, and the scan should not run on every tick.
+     */
+    private static final int MIN_REBUILD_INTERVAL = 4;
+
+    /** Only the nearest candidates are kept, so a lava lake cannot crowd out a nearby torch. */
     private static final int MAX_CANDIDATES = 512;
 
     private static final float[] WORLD = new float[HARD_MAX * 4];   // x, y, z, intensity
@@ -52,6 +59,7 @@ public final class AnalyticLighting {
     private static int anchorX, anchorY, anchorZ;
     private static boolean hasAnchor;
     private static boolean dirty = true;
+    private static int ticksSinceRebuild;
     private static ClientWorld lastWorld;
 
     private static int maxLights = -1;
@@ -84,10 +92,10 @@ public final class AnalyticLighting {
 
             int chosen = 8;
 
-            // A vec3 array element may be padded to a full vec4 by the driver, so budget eight
-            // components per light plus 72 for the matrices, fog, samplers and the hand light.
-            // On a 256-component device this picks 16, which comfortably fits; 24 only appears
-            // when the query reports at least 512.
+            // A vec4 array element plus a vec3 array element may both be padded to a full vec4 by
+            // the driver, so budget eight components per light plus 72 for the matrices, fog,
+            // samplers and the hand light. On the 256-component GLES minimum this picks 16, which
+            // comfortably fits; 24 appears from 264 components and 32 from 328.
             for (int candidate : new int[] { 32, 24, 16 }) {
                 if (candidate * 8 + 72 <= components) {
                     chosen = candidate;
@@ -123,17 +131,20 @@ public final class AnalyticLighting {
         int centerY = (int) Math.floor(camera.y);
         int centerZ = (int) Math.floor(camera.z);
 
+        ticksSinceRebuild++;
+
         boolean moved = !hasAnchor
                 || world != lastWorld
                 || Math.abs(centerX - anchorX) > ANCHOR_DISTANCE
                 || Math.abs(centerY - anchorY) > ANCHOR_DISTANCE
                 || Math.abs(centerZ - anchorZ) > ANCHOR_DISTANCE;
 
-        if (!dirty && !moved) {
+        if (!moved && (!dirty || ticksSinceRebuild < MIN_REBUILD_INTERVAL)) {
             return;
         }
 
         dirty = false;
+        ticksSinceRebuild = 0;
         hasAnchor = true;
         lastWorld = world;
         anchorX = centerX;
@@ -156,7 +167,7 @@ public final class AnalyticLighting {
         ColoredLighting.scanSources(world, minX, minY, minZ, maxX, maxY, maxZ, (state, x, y, z) -> {
             int luminance = state.getLuminance();
 
-            if (luminance <= 0 || candidateCount >= MAX_CANDIDATES) {
+            if (luminance <= 0) {
                 return;
             }
 
@@ -168,17 +179,8 @@ public final class AnalyticLighting {
             float dy = py - (float) camera.y;
             float dz = pz - (float) camera.z;
 
-            float[] color = ColoredLighting.colorFor(state.getBlock());
-
-            int index = candidateCount++;
-            CAND_X[index] = px;
-            CAND_Y[index] = py;
-            CAND_Z[index] = pz;
-            CAND_STRENGTH[index] = ColoredLighting.lightStrength(luminance);
-            CAND_R[index] = color[0];
-            CAND_G[index] = color[1];
-            CAND_B[index] = color[2];
-            CAND_DIST[index] = dx * dx + dy * dy + dz * dz;
+            offerCandidate(px, py, pz, ColoredLighting.lightStrength(luminance),
+                    ColoredLighting.colorFor(state.getBlock()), dx * dx + dy * dy + dz * dz);
         });
 
         selectNearest();
@@ -188,6 +190,102 @@ public final class AnalyticLighting {
         if (count == 0) {
             Arrays.fill(COLORS, 0.0F);
         }
+    }
+
+    /**
+     * Keeps the {@link #MAX_CANDIDATES} closest emitters in a max-heap keyed by squared distance.
+     * A lava lake can contain far more emitters than the cap, and truncating in scan order would
+     * keep the first corner of the box instead of the torches next to the player.
+     */
+    private static void offerCandidate(float x, float y, float z, float strength, float[] color,
+                                       float distanceSq) {
+        if (candidateCount < MAX_CANDIDATES) {
+            int index = candidateCount++;
+            setCandidate(index, x, y, z, strength, color, distanceSq);
+            siftUp(index);
+            return;
+        }
+
+        if (distanceSq >= CAND_DIST[0]) {
+            return;
+        }
+
+        setCandidate(0, x, y, z, strength, color, distanceSq);
+        siftDown(0);
+    }
+
+    private static void setCandidate(int index, float x, float y, float z, float strength,
+                                     float[] color, float distanceSq) {
+        CAND_X[index] = x;
+        CAND_Y[index] = y;
+        CAND_Z[index] = z;
+        CAND_STRENGTH[index] = strength;
+        CAND_R[index] = color[0];
+        CAND_G[index] = color[1];
+        CAND_B[index] = color[2];
+        CAND_DIST[index] = distanceSq;
+    }
+
+    private static void siftUp(int index) {
+        while (index > 0) {
+            int parent = (index - 1) >>> 1;
+
+            if (CAND_DIST[parent] >= CAND_DIST[index]) {
+                break;
+            }
+
+            swapCandidates(parent, index);
+            index = parent;
+        }
+    }
+
+    private static void siftDown(int index) {
+        while (true) {
+            int left = (index << 1) + 1;
+
+            if (left >= candidateCount) {
+                break;
+            }
+
+            int right = left + 1;
+            int child = right < candidateCount && CAND_DIST[right] > CAND_DIST[left] ? right : left;
+
+            if (CAND_DIST[child] <= CAND_DIST[index]) {
+                break;
+            }
+
+            swapCandidates(index, child);
+            index = child;
+        }
+    }
+
+    private static void swapCandidates(int a, int b) {
+        float x = CAND_X[a];
+        float y = CAND_Y[a];
+        float z = CAND_Z[a];
+        float strength = CAND_STRENGTH[a];
+        float r = CAND_R[a];
+        float g = CAND_G[a];
+        float bl = CAND_B[a];
+        float distance = CAND_DIST[a];
+
+        CAND_X[a] = CAND_X[b];
+        CAND_Y[a] = CAND_Y[b];
+        CAND_Z[a] = CAND_Z[b];
+        CAND_STRENGTH[a] = CAND_STRENGTH[b];
+        CAND_R[a] = CAND_R[b];
+        CAND_G[a] = CAND_G[b];
+        CAND_B[a] = CAND_B[b];
+        CAND_DIST[a] = CAND_DIST[b];
+
+        CAND_X[b] = x;
+        CAND_Y[b] = y;
+        CAND_Z[b] = z;
+        CAND_STRENGTH[b] = strength;
+        CAND_R[b] = r;
+        CAND_G[b] = g;
+        CAND_B[b] = bl;
+        CAND_DIST[b] = distance;
     }
 
     /**
