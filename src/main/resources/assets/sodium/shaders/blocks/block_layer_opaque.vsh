@@ -131,11 +131,12 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
         // depth rather than from the lightmap itself.
         float worldY = worldPos.y + u_CameraY;
         float depth = 1.0 - smoothstep(20.0, 110.0, worldY);
-        float depthWeight = mix(0.35, 1.0, depth * u_ShadowDepth);
+        float depthWeight = mix(1.0, mix(0.35, 1.0, depth), u_ShadowDepth);
+        float depthColor = depth * u_ShadowDepth;
 
         // Daylight shadows lean blue; deep shadows lean violet. The colored-light hue is mixed in
         // so a torch-lit shadow keeps the color of the torch instead of turning grey.
-        vec3 shade = mix(vec3(0.72, 0.82, 1.00), vec3(0.48, 0.38, 0.68), depth);
+        vec3 shade = mix(vec3(0.72, 0.82, 1.00), vec3(0.48, 0.38, 0.68), depthColor);
         vec3 hue = colored / max(max(colored.r, colored.g), max(colored.b, 1.0e-4));
         shade = mix(shade, hue, u_ShadowTint * colorAmount);
 
