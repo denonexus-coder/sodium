@@ -137,9 +137,12 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         // are Sodium shader features, so they are forced off here even if the config file still
         // has them on from a run without Iris. The reverse-order pass is translucent terrain
         // (water, stained glass); the option is about opaque surfaces, so it is left alone there.
+        // Cutout is skipped as well: derivatives after a non-uniform discard are undefined, and
+        // the effect is meant for solid ground rather than leaves and plants.
         boolean surfaceReflection = SodiumClientMod.options().experimental.surfaceReflection
                 && !ColoredLighting.isIrisLoaded()
-                && !pass.isReverseOrder();
+                && !pass.isReverseOrder()
+                && !pass.supportsFragmentDiscard();
         ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType, surfaceReflection);
 
         this.activeProgram = this.compileProgram(options);
