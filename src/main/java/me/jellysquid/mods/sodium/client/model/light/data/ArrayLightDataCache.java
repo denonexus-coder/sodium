@@ -17,11 +17,20 @@ public class ArrayLightDataCache extends LightDataAccess {
 
     private final int[] light;
 
+    // Per-slot generation stamp: a slot is valid when stamp[i] == generation. This replaces the
+    // old "0 means not computed" sentinel, which forced an 8000-int Arrays.fill (32 KB) on every
+    // single rebuild just to re-arm the sentinel -- see reset().
+    private final int[] stamp;
+
+    // Starts at 1 so that the zero-initialised stamps all miss on the first lookup.
+    private int generation = 1;
+
     private int xOffset, yOffset, zOffset;
 
     public ArrayLightDataCache(BlockRenderView world) {
         this.world = world;
         this.light = new int[BLOCK_LENGTH * BLOCK_LENGTH * BLOCK_LENGTH];
+        this.stamp = new int[BLOCK_LENGTH * BLOCK_LENGTH * BLOCK_LENGTH];
     }
 
     public void reset(ChunkSectionPos origin) {
@@ -29,7 +38,15 @@ public class ArrayLightDataCache extends LightDataAccess {
         this.yOffset = origin.getMinY() - NEIGHBOR_BLOCK_RADIUS;
         this.zOffset = origin.getMinZ() - NEIGHBOR_BLOCK_RADIUS;
 
-        Arrays.fill(this.light, 0);
+        // O(1) instead of the 8000-element clear this used to do: the index is derived from the
+        // origin, so a new origin invalidates every slot at once and a single counter carries that.
+        // The stamp array costs 32 KB per chunk-build worker and is paid back on the first rebuild.
+        if (++this.generation == 0) {
+            // Generation counter wrapped after 2^31 rebuilds. Clear rather than let a slot's stale
+            // stamp coincide with the new generation, then park it at 1 (all miss) again.
+            Arrays.fill(this.stamp, 0);
+            this.generation = 1;
+        }
     }
 
     private int index(int x, int y, int z) {
@@ -44,12 +61,15 @@ public class ArrayLightDataCache extends LightDataAccess {
     public int get(int x, int y, int z) {
         int l = this.index(x, y, z);
 
-        int word = this.light[l];
-
-        if (word != 0) {
-            return word;
+        if (this.stamp[l] == this.generation) {
+            return this.light[l];
         }
 
-        return this.light[l] = this.compute(x, y, z);
+        int word = this.compute(x, y, z);
+
+        this.light[l] = word;
+        this.stamp[l] = this.generation;
+
+        return word;
     }
 }
