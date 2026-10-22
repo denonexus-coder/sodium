@@ -40,8 +40,9 @@ import java.util.Map;
  * <ul>
  *     <li>{@link LightEngine#GRID}: a 32x16x32 grid around the player is rebuilt only when the
  *     player crosses an eight-block boundary or a block changes, then uploaded once as a 2D
- *     atlas. Sources are splatted with a Starlight-style flood fill that carries the source
- *     index, so every cell uses the same distance curve as the hand light.</li>
+ *     atlas. Emitters propagate with the exact hand-light distance curve; a max-heap finalises
+ *     each cell with the source that dominates it, so a lava lake costs one pass over the grid
+ *     instead of one pass per lava block.</li>
  *     <li>{@link LightEngine#ANALYTIC}: no texture at all. {@link AnalyticLighting} keeps a short
  *     list of nearby sources and the shader sums them with the same 12-block curve.</li>
  * </ul>
@@ -206,15 +207,25 @@ public final class ColoredLighting {
     // ---- Grid engine state ----------------------------------------------------------------
 
     private static final float[] GRID = new float[CELLS * 3];
-    private static final int[] QUEUE = new int[CELLS];
-    private static final int[] STAMP = new int[CELLS];
 
-    /** Flood-fill queue tail; the queue itself is a flat array with no per-entry objects. */
-    private static int queueTail;
-    private static int stampCounter;
+    /**
+     * Work buffers for the separable squared-Euclidean distance transform. For each luminance
+     * group the transform gives every cell the nearest source of that group, so the grid costs
+     * O(cells) per group instead of O(cells times sources): a lava lake with thousands of
+     * emitting blocks is still one pass.
+     */
+    private static final float[] DIST_A = new float[CELLS];
+    private static final float[] DIST_B = new float[CELLS];
+    private static final int[] ARG_A = new int[CELLS];
+    private static final int[] ARG_B = new int[CELLS];
+    private static final float[] BEST_KEY = new float[CELLS];
 
-    /** x, y, z (grid-local) then the three premultiplied colour components. */
-    private static float[] sources = new float[256 * 6];
+    private static final int MAX_AXIS = Math.max(SIZE_X, Math.max(SIZE_Y, SIZE_Z));
+    private static final int[] LINE_V = new int[MAX_AXIS];
+    private static final float[] LINE_Z = new float[MAX_AXIS + 2];
+
+    /** x, y, z (grid-local), the three premultiplied colour components, strength and luminance. */
+    private static float[] sources = new float[256 * 8];
     private static int sourceCount;
 
     private static int textureId;
@@ -489,15 +500,7 @@ public final class ColoredLighting {
                     float[] color = colorFor(state.getBlock());
                     float strength = lightStrength(luminance);
 
-                    // The 2D atlas is laid out x-fastest, then y for one Z slice, then the next
-                    // Z slice. Keep that order in the grid as well.
-                    int index = ((lz * SIZE_Y + ly) * SIZE_X + lx) * 3;
-
-                    GRID[index] = Math.max(GRID[index], color[0] * strength);
-                    GRID[index + 1] = Math.max(GRID[index + 1], color[1] * strength);
-                    GRID[index + 2] = Math.max(GRID[index + 2], color[2] * strength);
-
-                    addSource(lx, ly, lz, color, strength);
+                    addSource(lx, ly, lz, color, strength, luminance);
                 });
 
         diffuseGrid();
@@ -509,113 +512,195 @@ public final class ColoredLighting {
         upload();
     }
 
-    private static void addSource(int x, int y, int z, float[] color, float strength) {
-        if ((sourceCount + 1) * 6 > sources.length) {
+    private static void addSource(int x, int y, int z, float[] color, float strength, int luminance) {
+        if ((sourceCount + 1) * 8 > sources.length) {
             sources = Arrays.copyOf(sources, sources.length * 2);
         }
 
-        int base = sourceCount * 6;
+        int base = sourceCount * 8;
         sources[base] = x;
         sources[base + 1] = y;
         sources[base + 2] = z;
         sources[base + 3] = color[0] * strength;
         sources[base + 4] = color[1] * strength;
         sources[base + 5] = color[2] * strength;
+        sources[base + 6] = strength;
+        sources[base + 7] = luminance;
         sourceCount++;
     }
 
     /**
-     * Starlight-style flood fill. Each source owns one pass of a flat FIFO queue; every visited
-     * cell evaluates the exact distance to that source with the hand-light curve, and the six
-     * neighbours are queued only while they remain inside the 12-block sphere. The result is the
-     * same attenuation the shader applies to the held block, so a placed torch and a held torch
-     * have the same peak intensity and the same falloff on the floor.
+     * Builds the colored field from the emitters.
+     *
+     * <p>Each emitter is a cone: the strength at its cell times the squared hand attenuation at
+     * the exact Euclidean distance. A cell shows the source that dominates it, so the field is
+     * the maximum over the cones. Because two sources of different strengths have a curved
+     * dominance boundary, a flood fill that prunes dominated cells is not exact; the field is
+     * instead computed with the separable squared-Euclidean distance transform: for every
+     * luminance group (all its sources share one strength) the transform gives each cell the
+     * nearest source of the group, and the groups are then compared cell by cell.
+     *
+     * <p>This is what keeps lava lakes cheap: the transform is O(cells) per group, not O(cells
+     * times sources), and the attenuation is still the exact hand curve, so a placed torch has
+     * the same peak and the same falloff as the same torch in the hand.
      */
     private static void diffuseGrid() {
+        Arrays.fill(BEST_KEY, -1.0F);
+
+        int groups = 0;
+
         for (int source = 0; source < sourceCount; source++) {
-            int base = source * 6;
+            groups |= 1 << (int) sources[source * 8 + 7];
+        }
 
-            int sx = (int) sources[base];
-            int sy = (int) sources[base + 1];
-            int sz = (int) sources[base + 2];
+        for (int luminance = 1; luminance <= 15; luminance++) {
+            if ((groups & (1 << luminance)) == 0) {
+                continue;
+            }
 
-            float cr = sources[base + 3];
-            float cg = sources[base + 4];
-            float cb = sources[base + 5];
+            float strength = lightStrength(luminance);
+            boolean seeded = false;
 
-            int stamp = nextStamp();
+            Arrays.fill(DIST_A, Float.POSITIVE_INFINITY);
+            Arrays.fill(ARG_A, -1);
 
-            queueTail = 0;
+            for (int source = 0; source < sourceCount; source++) {
+                int base = source * 8;
 
-            int start = (sz * SIZE_Y + sy) * SIZE_X + sx;
-            STAMP[start] = stamp;
-            QUEUE[queueTail++] = start;
-
-            int head = 0;
-
-            while (head < queueTail) {
-                int index = QUEUE[head++];
-
-                int x = index % SIZE_X;
-                int y = (index / SIZE_X) % SIZE_Y;
-                int z = index / (SIZE_X * SIZE_Y);
-
-                int dx = x - sx;
-                int dy = y - sy;
-                int dz = z - sz;
-                int distSq = dx * dx + dy * dy + dz * dz;
-
-                float atten = 1.0F - (float) distSq / (LIGHT_RADIUS * LIGHT_RADIUS);
-
-                if (atten > 0.0F) {
-                    atten *= atten;
-
-                    int cell = index * 3;
-                    GRID[cell] = Math.max(GRID[cell], cr * atten);
-                    GRID[cell + 1] = Math.max(GRID[cell + 1], cg * atten);
-                    GRID[cell + 2] = Math.max(GRID[cell + 2], cb * atten);
+                if ((int) sources[base + 7] != luminance) {
+                    continue;
                 }
 
-                enqueue(x + 1, y, z, sx, sy, sz, stamp);
-                enqueue(x - 1, y, z, sx, sy, sz, stamp);
-                enqueue(x, y + 1, z, sx, sy, sz, stamp);
-                enqueue(x, y - 1, z, sx, sy, sz, stamp);
-                enqueue(x, y, z + 1, sx, sy, sz, stamp);
-                enqueue(x, y, z - 1, sx, sy, sz, stamp);
+                int index = ((int) sources[base + 2] * SIZE_Y + (int) sources[base + 1]) * SIZE_X
+                        + (int) sources[base];
+
+                DIST_A[index] = 0.0F;
+                ARG_A[index] = source;
+                seeded = true;
+            }
+
+            if (!seeded) {
+                continue;
+            }
+
+            distancePassX(DIST_A, ARG_A, DIST_B, ARG_B);
+            distancePassY(DIST_B, ARG_B, DIST_A, ARG_A);
+            distancePassZ(DIST_A, ARG_A, DIST_B, ARG_B);
+
+            for (int index = 0; index < CELLS; index++) {
+                float distSq = DIST_B[index];
+
+                if (distSq >= LIGHT_RADIUS_SQ) {
+                    continue;
+                }
+
+                float atten = 1.0F - distSq / (LIGHT_RADIUS * LIGHT_RADIUS);
+                float attenuationSq = atten * atten;
+                float key = strength * attenuationSq;
+
+                if (key <= BEST_KEY[index]) {
+                    continue;
+                }
+
+                BEST_KEY[index] = key;
+
+                int base = ARG_B[index] * 8;
+                int cell = index * 3;
+
+                GRID[cell] = sources[base + 3] * attenuationSq;
+                GRID[cell + 1] = sources[base + 4] * attenuationSq;
+                GRID[cell + 2] = sources[base + 5] * attenuationSq;
             }
         }
     }
 
-    private static int nextStamp() {
-        if (++stampCounter == 0) {
-            Arrays.fill(STAMP, 0);
-            stampCounter = 1;
+    private static void distancePassX(float[] srcDist, int[] srcArg, float[] dstDist, int[] dstArg) {
+        for (int z = 0; z < SIZE_Z; z++) {
+            for (int y = 0; y < SIZE_Y; y++) {
+                transformLine(srcDist, srcArg, dstDist, dstArg, (z * SIZE_Y + y) * SIZE_X, 1, SIZE_X);
+            }
         }
-
-        return stampCounter;
     }
 
-    private static void enqueue(int x, int y, int z, int sx, int sy, int sz, int stamp) {
-        if (x < 0 || x >= SIZE_X || y < 0 || y >= SIZE_Y || z < 0 || z >= SIZE_Z) {
+    private static void distancePassY(float[] srcDist, int[] srcArg, float[] dstDist, int[] dstArg) {
+        for (int z = 0; z < SIZE_Z; z++) {
+            for (int x = 0; x < SIZE_X; x++) {
+                transformLine(srcDist, srcArg, dstDist, dstArg, z * SIZE_Y * SIZE_X + x, SIZE_X, SIZE_Y);
+            }
+        }
+    }
+
+    private static void distancePassZ(float[] srcDist, int[] srcArg, float[] dstDist, int[] dstArg) {
+        for (int y = 0; y < SIZE_Y; y++) {
+            for (int x = 0; x < SIZE_X; x++) {
+                transformLine(srcDist, srcArg, dstDist, dstArg, y * SIZE_X + x, SIZE_X * SIZE_Y, SIZE_Z);
+            }
+        }
+    }
+
+    /**
+     * Felzenszwalb-Huttenlocher one-dimensional squared-distance transform. The lower envelope of
+     * the parabolas is built in linear time, and every output cell carries the argument (source)
+     * of the parabola that won, so the colour is recovered without a second pass.
+     */
+    private static void transformLine(float[] srcDist, int[] srcArg, float[] dstDist, int[] dstArg,
+                                      int base, int stride, int length) {
+        int envelopeSize = -1;
+
+        for (int q = 0; q < length; q++) {
+            float fq = srcDist[base + q * stride];
+
+            if (fq == Float.POSITIVE_INFINITY) {
+                continue;
+            }
+
+            float qSquared = (float) q * q;
+            float intersection = Float.NEGATIVE_INFINITY;
+
+            while (envelopeSize >= 0) {
+                int vk = LINE_V[envelopeSize];
+                float divisor = 2.0F * (q - vk);
+                intersection = ((fq + qSquared) - (srcDist[base + vk * stride] + (float) vk * vk)) / divisor;
+
+                if (intersection <= LINE_Z[envelopeSize]) {
+                    envelopeSize--;
+                } else {
+                    break;
+                }
+            }
+
+            envelopeSize++;
+            LINE_V[envelopeSize] = q;
+
+            if (envelopeSize == 0) {
+                LINE_Z[0] = Float.NEGATIVE_INFINITY;
+            } else {
+                LINE_Z[envelopeSize] = intersection;
+            }
+        }
+
+        if (envelopeSize < 0) {
+            for (int q = 0; q < length; q++) {
+                dstDist[base + q * stride] = Float.POSITIVE_INFINITY;
+                dstArg[base + q * stride] = -1;
+            }
+
             return;
         }
 
-        int dx = x - sx;
-        int dy = y - sy;
-        int dz = z - sz;
+        int envelope = 0;
 
-        if (dx * dx + dy * dy + dz * dz >= LIGHT_RADIUS_SQ) {
-            return;
+        for (int q = 0; q < length; q++) {
+            while (envelope < envelopeSize && LINE_Z[envelope + 1] < q) {
+                envelope++;
+            }
+
+            int vk = LINE_V[envelope];
+            float distSq = (float) (q - vk) * (q - vk) + srcDist[base + vk * stride];
+
+            dstDist[base + q * stride] = distSq;
+            dstArg[base + q * stride] = srcArg[base + vk * stride];
         }
-
-        int index = (z * SIZE_Y + y) * SIZE_X + x;
-
-        if (STAMP[index] == stamp) {
-            return;
-        }
-
-        STAMP[index] = stamp;
-        QUEUE[queueTail++] = index;
     }
 
     // ---- Section scan ---------------------------------------------------------------------
