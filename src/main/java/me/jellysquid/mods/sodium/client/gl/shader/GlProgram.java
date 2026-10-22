@@ -54,6 +54,12 @@ public class GlProgram<T> extends GlObject implements ShaderBindingContext {
     public <U extends GlUniform<?>> U bindUniform(String name, IntFunction<U> factory) {
         int index = GL20C.glGetUniformLocation(this.handle(), name);
 
+        // Some drivers only resolve the explicit first element of an array; the spec allows both
+        // spellings, so try the indexed name before giving up.
+        if (index < 0 && !name.endsWith("]")) {
+            index = GL20C.glGetUniformLocation(this.handle(), name + "[0]");
+        }
+
         if (index < 0) {
             throw new NullPointerException("No uniform exists with name: " + name);
         }

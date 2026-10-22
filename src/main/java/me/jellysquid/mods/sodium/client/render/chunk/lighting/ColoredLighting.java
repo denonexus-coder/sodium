@@ -2,6 +2,7 @@ package me.jellysquid.mods.sodium.client.render.chunk.lighting;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
+import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightEngine;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightingPath;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.AbstractCandleBlock;
@@ -15,6 +16,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.WorldChunk;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
@@ -23,6 +26,7 @@ import org.lwjgl.opengl.GL32C;
 
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -30,16 +34,17 @@ import java.util.Map;
  * Colored block and hand light for the chunk shader.
  *
  * <p>The vanilla lightmap holds one warm ramp for every light source, so a soul lantern and a
- * lava lake end up the same color. This class builds a small 3D grid around the player where each
- * cell carries the color of the light that reaches it, and the chunk shader samples it with the
- * world position it already computes. No chunk is rebuilt when the grid changes: the light lives
- * in a texture, not in the vertex data.
+ * lava lake end up the same color. This class owns the palette, the shared hand light and the
+ * setting that chooses between the two engines:
  *
- * <p>The grid is re-scanned every {@link #REBUILD_INTERVAL} client ticks. Sources are seeded with
- * their palette color and then diffused with a max-blur, which is what gives the halo around a
- * torch without a flood fill that would have to know about walls. It is an approximation: light
- * crosses a wall here, because the grid has no occlusion and the cost of adding it is not worth
- * it for a light radius of a few blocks.
+ * <ul>
+ *     <li>{@link LightEngine#GRID}: a 32x16x32 grid around the player is rebuilt only when the
+ *     player crosses an eight-block boundary or a block changes, then uploaded once as a 2D
+ *     atlas. Sources are splatted with a Starlight-style flood fill that carries the source
+ *     index, so every cell uses the same distance curve as the hand light.</li>
+ *     <li>{@link LightEngine#ANALYTIC}: no texture at all. {@link AnalyticLighting} keeps a short
+ *     list of nearby sources and the shader sums them with the same 12-block curve.</li>
+ * </ul>
  *
  * <p>Everything is off when Iris has a shader pack active. Iris replaces the chunk shader in that
  * case, so there is nothing for this code to feed and the scan would be wasted work; the GUI says
@@ -51,11 +56,26 @@ public final class ColoredLighting {
     public static final int SIZE_Z = 32;
 
     private static final int CELLS = SIZE_X * SIZE_Y * SIZE_Z;
-    // Short enough that a newly placed source shows its colour almost immediately; the scan is
-    // only 32x16x32 cells, so four rebuilds per second are cheap.
-    private static final int REBUILD_INTERVAL = 5;
-    private static final int DIFFUSE_PASSES = 6;
-    private static final float DIFFUSE_DECAY = 0.84F;
+
+    /** The hand and the placed lights share this radius; the shader hard-codes the same value. */
+    public static final float LIGHT_RADIUS = 12.0F;
+    private static final int LIGHT_RADIUS_SQ = (int) (LIGHT_RADIUS * LIGHT_RADIUS);
+
+    /**
+     * The grid is rebuilt when the player moves further than this from the anchor used for the
+     * previous rebuild. Moving every tick is what made the old version flicker.
+     */
+    private static final int ANCHOR_DISTANCE = 8;
+
+    /** Safety net only: a missed dirty event must not leave a stale grid forever. */
+    private static final int GRID_REFRESH_TICKS = 200;
+
+    /**
+     * Floor between two dirty rebuilds. Block updates can arrive in bursts (redstone, fluids,
+     * chunk lighting); batching them keeps the grid at the same 4 Hz the old periodic rebuild
+     * used, without the per-frame origin drift that caused the flicker.
+     */
+    private static final int MIN_GRID_INTERVAL = 4;
 
     /** The fallback for a light source that is not in the table below. */
     private static final float[] NEUTRAL = rgb(0xCCCCCC);
@@ -183,17 +203,35 @@ public final class ColoredLighting {
         COLORS.put(Blocks.SMALL_AMETHYST_BUD, amethystSmall);
     }
 
+    // ---- Grid engine state ----------------------------------------------------------------
+
     private static final float[] GRID = new float[CELLS * 3];
-    private static final float[] SCRATCH = new float[CELLS * 3];
+    private static final int[] QUEUE = new int[CELLS];
+    private static final int[] STAMP = new int[CELLS];
+
+    /** Flood-fill queue tail; the queue itself is a flat array with no per-entry objects. */
+    private static int queueTail;
+    private static int stampCounter;
+
+    /** x, y, z (grid-local) then the three premultiplied colour components. */
+    private static float[] sources = new float[256 * 6];
+    private static int sourceCount;
 
     private static int textureId;
     private static ByteBuffer uploadBuffer;
     private static int originX, originY, originZ;
 
-    private static int tickCounter;
+    private static int anchorX, anchorY, anchorZ;
+    private static boolean hasAnchor;
+    private static boolean gridDirty = true;
+    private static int ticksSinceGridRebuild;
+
+    // ---- Shared state ---------------------------------------------------------------------
+
     private static int irisTimer;
     private static boolean irisPack;
     private static boolean shaderFailed;
+    private static boolean analyticFailed;
 
     private ColoredLighting() {
     }
@@ -213,14 +251,42 @@ public final class ColoredLighting {
         return isActive() && getPath() == LightingPath.ESSL;
     }
 
+    /** The engine chosen in the options; the grid is the default. */
+    public static LightEngine getEngine() {
+        LightEngine engine = SodiumClientMod.options().experimental.lightEngine;
+
+        return engine == null ? LightEngine.GRID : engine;
+    }
+
+    /**
+     * Whether the analytic program is both selected and usable. When its shader failed to build
+     * this returns false and the grid engine takes over for the rest of the session, instead of
+     * leaving the world without colored light.
+     */
+    public static boolean useAnalytic() {
+        return isActive() && !analyticFailed && getEngine() == LightEngine.ANALYTIC;
+    }
+
+    public static int getMaxLights() {
+        return AnalyticLighting.getMaxLights();
+    }
+
     /** Called by the shader compiler when the colored program fails to compile or link. */
     public static void markShaderFailed() {
         shaderFailed = true;
     }
 
+    /** Called when the analytic program failed but the grid program is still usable. */
+    public static void markAnalyticFailed() {
+        analyticFailed = true;
+        gridDirty = true;
+    }
+
     /** Lets the user retry after changing the path, without restarting the game. */
     public static void resetShaderFailure() {
         shaderFailed = false;
+        analyticFailed = false;
+        gridDirty = true;
     }
 
     /**
@@ -339,67 +405,102 @@ public final class ColoredLighting {
         color[2] = blockColor[2];
     }
 
+    /** Called from the block-update hooks so both engines refresh on the next tick. */
+    public static void markDirty() {
+        gridDirty = true;
+        AnalyticLighting.markDirty();
+    }
+
     /** Client tick hook; the scan runs on the render thread, so it can upload the texture. */
     public static void tick() {
         MinecraftClient client = MinecraftClient.getInstance();
 
         if (!isActive() || client.world == null || client.player == null || client.isPaused()) {
-            tickCounter = 0;
             return;
         }
 
-        if (++tickCounter < REBUILD_INTERVAL) {
-            return;
+        if (useAnalytic()) {
+            AnalyticLighting.tick(client);
+        } else {
+            tickGrid(client);
         }
-
-        tickCounter = 0;
-        rebuild(client.world, client.player.getBlockPos());
     }
 
-    private static void rebuild(ClientWorld world, BlockPos center) {
+    private static void tickGrid(MinecraftClient client) {
+        BlockPos center = client.player.getBlockPos();
+
+        ticksSinceGridRebuild++;
+
+        boolean moved = !hasAnchor
+                || Math.abs(center.getX() - anchorX) > ANCHOR_DISTANCE
+                || Math.abs(center.getY() - anchorY) > ANCHOR_DISTANCE
+                || Math.abs(center.getZ() - anchorZ) > ANCHOR_DISTANCE;
+
+        boolean rebuild;
+
+        if (moved) {
+            rebuild = true;
+        } else if (gridDirty) {
+            rebuild = ticksSinceGridRebuild >= MIN_GRID_INTERVAL;
+        } else {
+            rebuild = ticksSinceGridRebuild >= GRID_REFRESH_TICKS;
+        }
+
+        if (!rebuild) {
+            return;
+        }
+
+        gridDirty = false;
+        ticksSinceGridRebuild = 0;
+        hasAnchor = true;
+        anchorX = center.getX();
+        anchorY = center.getY();
+        anchorZ = center.getZ();
+
+        rebuildGrid(client.world, center);
+    }
+
+    // ---- Grid rebuild ---------------------------------------------------------------------
+
+    private static void rebuildGrid(ClientWorld world, BlockPos center) {
         int ox = center.getX() - SIZE_X / 2;
         int oy = center.getY() - SIZE_Y / 2;
         int oz = center.getZ() - SIZE_Z / 2;
 
-        java.util.Arrays.fill(GRID, 0.0F);
+        Arrays.fill(GRID, 0.0F);
+        sourceCount = 0;
 
-        for (int z = 0; z < SIZE_Z; z++) {
-            for (int y = 0; y < SIZE_Y; y++) {
-                int worldY = oy + y;
-
-                if (world.isOutOfHeightLimit(worldY)) {
-                    continue;
-                }
-
-                for (int x = 0; x < SIZE_X; x++) {
-                    BlockPos pos = new BlockPos(ox + x, worldY, oz + z);
-                    BlockState state = world.getBlockState(pos);
-
-                    if (state.isAir()) {
-                        continue;
-                    }
-
+        scanSources(world, ox, oy, oz, ox + SIZE_X - 1, oy + SIZE_Y - 1, oz + SIZE_Z - 1,
+                (state, x, y, z) -> {
                     int luminance = state.getLuminance();
 
                     if (luminance <= 0) {
-                        continue;
+                        return;
+                    }
+
+                    int lx = x - ox;
+                    int ly = y - oy;
+                    int lz = z - oz;
+
+                    if (lx < 0 || lx >= SIZE_X || ly < 0 || ly >= SIZE_Y || lz < 0 || lz >= SIZE_Z) {
+                        return;
                     }
 
                     float[] color = colorFor(state.getBlock());
-                    // The 2D atlas is laid out x-fastest, then y for one Z slice, then the
-                    // next Z slice. Keep that order in the grid as well; swapping y and z here
-                    // used to put every source at the wrong world position.
-                    int index = ((z * SIZE_Y + y) * SIZE_X + x) * 3;
                     float strength = lightStrength(luminance);
+
+                    // The 2D atlas is laid out x-fastest, then y for one Z slice, then the next
+                    // Z slice. Keep that order in the grid as well.
+                    int index = ((lz * SIZE_Y + ly) * SIZE_X + lx) * 3;
 
                     GRID[index] = Math.max(GRID[index], color[0] * strength);
                     GRID[index + 1] = Math.max(GRID[index + 1], color[1] * strength);
                     GRID[index + 2] = Math.max(GRID[index + 2], color[2] * strength);
-                }
-            }
-        }
 
-        diffuse();
+                    addSource(lx, ly, lz, color, strength);
+                });
+
+        diffuseGrid();
 
         originX = ox;
         originY = oy;
@@ -408,50 +509,191 @@ public final class ColoredLighting {
         upload();
     }
 
+    private static void addSource(int x, int y, int z, float[] color, float strength) {
+        if ((sourceCount + 1) * 6 > sources.length) {
+            sources = Arrays.copyOf(sources, sources.length * 2);
+        }
+
+        int base = sourceCount * 6;
+        sources[base] = x;
+        sources[base + 1] = y;
+        sources[base + 2] = z;
+        sources[base + 3] = color[0] * strength;
+        sources[base + 4] = color[1] * strength;
+        sources[base + 5] = color[2] * strength;
+        sourceCount++;
+    }
+
     /**
-     * Six max-blur passes. A cell takes the strongest neighbor it has, decayed by one step; the
-     * result is a soft falloff in every direction instead of a hard sphere around each source.
+     * Starlight-style flood fill. Each source owns one pass of a flat FIFO queue; every visited
+     * cell evaluates the exact distance to that source with the hand-light curve, and the six
+     * neighbours are queued only while they remain inside the 12-block sphere. The result is the
+     * same attenuation the shader applies to the held block, so a placed torch and a held torch
+     * have the same peak intensity and the same falloff on the floor.
      */
-    private static void diffuse() {
-        for (int pass = 0; pass < DIFFUSE_PASSES; pass++) {
-            System.arraycopy(GRID, 0, SCRATCH, 0, GRID.length);
+    private static void diffuseGrid() {
+        for (int source = 0; source < sourceCount; source++) {
+            int base = source * 6;
 
-            for (int z = 0; z < SIZE_Z; z++) {
-                for (int y = 0; y < SIZE_Y; y++) {
-                    for (int x = 0; x < SIZE_X; x++) {
-                        int index = ((z * SIZE_Y + y) * SIZE_X + x) * 3;
+            int sx = (int) sources[base];
+            int sy = (int) sources[base + 1];
+            int sz = (int) sources[base + 2];
 
-                        if (x > 0) {
-                            spread(index, index - 3);
-                        }
-                        if (x + 1 < SIZE_X) {
-                            spread(index, index + 3);
-                        }
-                        if (z > 0) {
-                            spread(index, index - SIZE_X * SIZE_Y * 3);
-                        }
-                        if (z + 1 < SIZE_Z) {
-                            spread(index, index + SIZE_X * SIZE_Y * 3);
-                        }
-                        if (y > 0) {
-                            spread(index, index - SIZE_X * 3);
-                        }
-                        if (y + 1 < SIZE_Y) {
-                            spread(index, index + SIZE_X * 3);
-                        }
-                    }
+            float cr = sources[base + 3];
+            float cg = sources[base + 4];
+            float cb = sources[base + 5];
+
+            int stamp = nextStamp();
+
+            queueTail = 0;
+
+            int start = (sz * SIZE_Y + sy) * SIZE_X + sx;
+            STAMP[start] = stamp;
+            QUEUE[queueTail++] = start;
+
+            int head = 0;
+
+            while (head < queueTail) {
+                int index = QUEUE[head++];
+
+                int x = index % SIZE_X;
+                int y = (index / SIZE_X) % SIZE_Y;
+                int z = index / (SIZE_X * SIZE_Y);
+
+                int dx = x - sx;
+                int dy = y - sy;
+                int dz = z - sz;
+                int distSq = dx * dx + dy * dy + dz * dz;
+
+                float atten = 1.0F - (float) distSq / (LIGHT_RADIUS * LIGHT_RADIUS);
+
+                if (atten > 0.0F) {
+                    atten *= atten;
+
+                    int cell = index * 3;
+                    GRID[cell] = Math.max(GRID[cell], cr * atten);
+                    GRID[cell + 1] = Math.max(GRID[cell + 1], cg * atten);
+                    GRID[cell + 2] = Math.max(GRID[cell + 2], cb * atten);
                 }
-            }
 
-            System.arraycopy(SCRATCH, 0, GRID, 0, GRID.length);
+                enqueue(x + 1, y, z, sx, sy, sz, stamp);
+                enqueue(x - 1, y, z, sx, sy, sz, stamp);
+                enqueue(x, y + 1, z, sx, sy, sz, stamp);
+                enqueue(x, y - 1, z, sx, sy, sz, stamp);
+                enqueue(x, y, z + 1, sx, sy, sz, stamp);
+                enqueue(x, y, z - 1, sx, sy, sz, stamp);
+            }
         }
     }
 
-    private static void spread(int target, int neighbor) {
-        SCRATCH[target] = Math.max(SCRATCH[target], GRID[neighbor] * DIFFUSE_DECAY);
-        SCRATCH[target + 1] = Math.max(SCRATCH[target + 1], GRID[neighbor + 1] * DIFFUSE_DECAY);
-        SCRATCH[target + 2] = Math.max(SCRATCH[target + 2], GRID[neighbor + 2] * DIFFUSE_DECAY);
+    private static int nextStamp() {
+        if (++stampCounter == 0) {
+            Arrays.fill(STAMP, 0);
+            stampCounter = 1;
+        }
+
+        return stampCounter;
     }
+
+    private static void enqueue(int x, int y, int z, int sx, int sy, int sz, int stamp) {
+        if (x < 0 || x >= SIZE_X || y < 0 || y >= SIZE_Y || z < 0 || z >= SIZE_Z) {
+            return;
+        }
+
+        int dx = x - sx;
+        int dy = y - sy;
+        int dz = z - sz;
+
+        if (dx * dx + dy * dy + dz * dz >= LIGHT_RADIUS_SQ) {
+            return;
+        }
+
+        int index = (z * SIZE_Y + y) * SIZE_X + x;
+
+        if (STAMP[index] == stamp) {
+            return;
+        }
+
+        STAMP[index] = stamp;
+        QUEUE[queueTail++] = index;
+    }
+
+    // ---- Section scan ---------------------------------------------------------------------
+
+    public interface BlockConsumer {
+        void accept(BlockState state, int x, int y, int z);
+    }
+
+    /**
+     * Visits only sections whose palette contains a luminous block. The palette test is an idea
+     * ported from Starlight's source collection: a section with no emitter never needs its 4096
+     * cells read, which turns a full box scan into a handful of section checks.
+     */
+    static void scanSources(ClientWorld world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ,
+                            BlockConsumer consumer) {
+        int minChunkX = minX >> 4;
+        int maxChunkX = maxX >> 4;
+        int minChunkZ = minZ >> 4;
+        int maxChunkZ = maxZ >> 4;
+
+        int bottomSection = world.getBottomY() >> 4;
+        int topSection = (world.getTopY() - 1) >> 4;
+
+        int minSectionY = Math.max(minY >> 4, bottomSection);
+        int maxSectionY = Math.min(maxY >> 4, topSection);
+
+        for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+                WorldChunk chunk = world.getChunk(chunkX, chunkZ);
+
+                if (chunk == null) {
+                    continue;
+                }
+
+                ChunkSection[] sections = chunk.getSectionArray();
+
+                for (int sectionY = minSectionY; sectionY <= maxSectionY; sectionY++) {
+                    int index = world.sectionCoordToIndex(sectionY);
+
+                    if (index < 0 || index >= sections.length) {
+                        continue;
+                    }
+
+                    ChunkSection section = sections[index];
+
+                    if (section == null || section.isEmpty()) {
+                        continue;
+                    }
+
+                    if (!section.hasAny(state -> state.getLuminance() > 0)) {
+                        continue;
+                    }
+
+                    var container = section.getBlockStateContainer();
+
+                    int baseX = chunkX << 4;
+                    int baseY = sectionY << 4;
+                    int baseZ = chunkZ << 4;
+
+                    // PalettedContainer index order: x in the low bits, then z, then y.
+                    for (int i = 0; i < 4096; i++) {
+                        BlockState state = container.get(i);
+
+                        if (state.getLuminance() <= 0) {
+                            continue;
+                        }
+
+                        consumer.accept(state,
+                                baseX + (i & 15),
+                                baseY + ((i >> 8) & 15),
+                                baseZ + ((i >> 4) & 15));
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Atlas upload ---------------------------------------------------------------------
 
     private static void upload() {
         if (textureId == 0) {
@@ -511,12 +753,14 @@ public final class ColoredLighting {
         GlStateManager._activeTexture(previousTexture);
     }
 
+    // ---- Shared helpers -------------------------------------------------------------------
+
     /**
      * The same peak intensity for a block in the hand and for the same block placed in the world.
      * Luminance is the only property both paths can agree on: the hand has no block state, and the
      * grid has no item stack.
      */
-    private static float lightStrength(int luminance) {
+    static float lightStrength(int luminance) {
         return 0.55F + (0.45F * luminance / 15.0F);
     }
 
@@ -528,7 +772,7 @@ public final class ColoredLighting {
         };
     }
 
-    private static float[] colorFor(Block block) {
+    static float[] colorFor(Block block) {
         float[] color = COLORS.get(block);
 
         if (color == null) {

@@ -24,18 +24,40 @@ uniform vec2 u_TexCoordShrink;
 uniform sampler2D u_LightTex; // The light map texture sampler
 
 #ifdef COLORED_LIGHTING
-uniform highp sampler2D u_ColorLightTex; // 2D atlas: X by (Y * Z) RGB cells
-uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
-uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
-
 uniform vec4 u_HandLight;          // xyz: camera-relative hand position, w: intensity
 uniform vec3 u_HandLightColor;
 
+#ifdef ANALYTIC_LIGHTING
+// A short list of nearby lights: position is camera-relative, w is the peak intensity, and the
+// color is the same palette value the hand light uses. There is no texture in this path.
+uniform vec4 u_LightPos[MAX_LIGHTS];
+uniform vec3 u_LightColor[MAX_LIGHTS];
+uniform int u_LightCount;
+#else
+uniform highp sampler2D u_ColorLightTex; // 2D atlas: X by (Y * Z) RGB cells
+uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
+uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
+#endif
+
 vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
     // The block column of the vanilla lightmap is a single warm ramp, so it is not used here:
-    // only the sky column is sampled, and the block term comes from the colored grid.
+    // only the sky column is sampled, and the block term is computed below.
     vec3 sky = texture(u_LightTex, vec2(0.0, lightCoord.y)).rgb;
 
+#ifdef ANALYTIC_LIGHTING
+    // Identical curve to the hand light below: same 12-block radius, same squared falloff.
+    // A source therefore starts at exactly the hand intensity and fades the same way.
+    vec3 colored = vec3(0.0);
+
+    for (int i = 0; i < u_LightCount; i++) {
+        vec3 delta = worldPos - u_LightPos[i].xyz;
+        float distSq = dot(delta, delta);
+        float atten = max(0.0, 1.0 - distSq * (1.0 / 144.0));
+        atten *= atten;
+
+        colored += u_LightColor[i] * (atten * u_LightPos[i].w);
+    }
+#else
     vec3 gridCoord = (worldPos - u_ColorLightOrigin) * u_ColorLightScale;
 
     // The grid is uploaded as a 2D atlas: X pixels across, then a block of Y rows for every Z
@@ -59,12 +81,15 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
     vec3 edgeDist = min(gridCoord, vec3(1.0) - gridCoord);
     float edge = min(min(edgeDist.x, edgeDist.y), edgeDist.z);
     colored *= smoothstep(0.0, 0.08, edge);
+#endif
 
-    // The grid already carries the source colour multiplied by its strength. Multiplying it by
-    // lightCoord.x would apply the vanilla warm ramp a second time, and multiplying it by a gain
-    // would clip pale sources to white at the source cell. Keep the warm base only where the grid
-    // found no colour; the placed source then starts at exactly the hand colour and fades only
-    // through the grid's diffusion.
+    // The vanilla block-light column is a conservative gate: it is 0 in complete darkness and
+    // behind walls, and saturates from block light 2 upwards. Multiplying by it removes light
+    // leaking through solid walls without dimming the lit area.
+    colored *= smoothstep(0.0, 0.08, lightCoord.x);
+
+    // Keep the warm base only where no colored source reaches, so a distant lit area that was
+    // not scanned still looks like vanilla instead of going black.
     vec3 warm = vec3(0.62, 0.50, 0.32) * lightCoord.x;
     float colorAmount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
     vec3 block = mix(warm, colored, colorAmount);

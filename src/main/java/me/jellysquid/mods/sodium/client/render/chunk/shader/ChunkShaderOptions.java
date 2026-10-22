@@ -6,10 +6,10 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexTy
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType) {
     public ShaderConstants constants() {
-        return this.constants(false);
+        return this.constants(false, false, 0);
     }
 
-    public ShaderConstants constants(boolean coloredLighting) {
+    public ShaderConstants constants(boolean coloredLighting, boolean analyticLighting, int maxLights) {
         ShaderConstants.Builder constants = ShaderConstants.builder();
         constants.addAll(this.fog.getDefines());
 
@@ -21,6 +21,11 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
 
         if (coloredLighting) {
             constants.add("COLORED_LIGHTING");
+
+            if (analyticLighting) {
+                constants.add("ANALYTIC_LIGHTING");
+                constants.add("MAX_LIGHTS", Integer.toString(maxLights));
+            }
         }
 
         return constants.build();

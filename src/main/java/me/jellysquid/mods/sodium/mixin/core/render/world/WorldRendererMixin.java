@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
 import me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.render.viewport.ViewportProvider;
 import me.jellysquid.mods.sodium.client.util.FlawlessFrames;
 import me.jellysquid.mods.sodium.client.world.WorldRendererExtended;
@@ -135,6 +136,7 @@ public abstract class WorldRendererMixin implements WorldRendererExtended {
     @Overwrite
     public void scheduleBlockRenders(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
         this.renderer.scheduleRebuildForBlockArea(minX, minY, minZ, maxX, maxY, maxZ, false);
+        ColoredLighting.markDirty();
     }
 
     /**
@@ -144,6 +146,7 @@ public abstract class WorldRendererMixin implements WorldRendererExtended {
     @Overwrite
     public void scheduleBlockRenders(int x, int y, int z) {
         this.renderer.scheduleRebuildForChunks(x - 1, y - 1, z - 1, x + 1, y + 1, z + 1, false);
+        ColoredLighting.markDirty();
     }
 
     /**
@@ -153,6 +156,7 @@ public abstract class WorldRendererMixin implements WorldRendererExtended {
     @Overwrite
     private void scheduleSectionRender(BlockPos pos, boolean important) {
         this.renderer.scheduleRebuildForBlockArea(pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1, pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1, important);
+        ColoredLighting.markDirty();
     }
 
     /**

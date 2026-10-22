@@ -97,8 +97,21 @@ public class SodiumGameOptions {
     public static class ExperimentalSettings {
         public LightingPath lighting = LightingPath.OFF;
 
+        /**
+         * Which engine feeds the colored light. The grid is the default because it is the older,
+         * cheaper path; the analytic list is opt-in.
+         */
+        public LightEngine lightEngine = LightEngine.GRID;
+
         /** Adds the light of the held block to the chunk shader; costs a few ALU per vertex. */
         public boolean handLight = true;
+    }
+
+    public enum LightEngine {
+        /** A 2D atlas rebuilt around the player and sampled by the chunk shader. */
+        GRID,
+        /** A short list of nearby lights uploaded as uniforms and summed in the shader. */
+        ANALYTIC
     }
 
     public enum LightingPath {

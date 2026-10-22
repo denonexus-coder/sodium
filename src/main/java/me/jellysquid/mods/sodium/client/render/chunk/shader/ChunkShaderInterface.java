@@ -3,10 +3,13 @@ package me.jellysquid.mods.sodium.client.render.chunk.shader;
 import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.gl.device.GLRenderDevice;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat2v;
+import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3Array;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3v;
+import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4Array;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformInt;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.AnalyticLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.impl.CompactChunkVertex;
 import me.jellysquid.mods.sodium.client.util.TextureUtil;
@@ -31,19 +34,29 @@ public class ChunkShaderInterface {
     private final GlUniformFloat3v uniformRegionOffset;
     private final GlUniformFloat2v uniformTexCoordShrink;
 
+    // Grid engine: a 2D atlas sampled by the shader.
     private final GlUniformInt uniformColorLightTex;
     private final GlUniformFloat3v uniformColorLightOrigin;
     private final GlUniformFloat3v uniformColorLightScale;
+
+    // Analytic engine: a short list of lights summed per vertex.
+    private final GlUniformFloat4Array uniformLightPos;
+    private final GlUniformFloat3Array uniformLightColor;
+    private final GlUniformInt uniformLightCount;
+
+    // Both engines share the hand light.
     private final GlUniformFloat4v uniformHandLight;
     private final GlUniformFloat3v uniformHandLightColor;
 
     private final float[] handLight = new float[4];
     private final float[] handColor = new float[3];
+    private final float[] lightPositions;
+    private final float[] lightColors;
 
     // The fog shader component used by this program in order to setup the appropriate GL state
     private final ChunkShaderFogComponent fogShader;
 
-    public ChunkShaderInterface(ShaderBindingContext context, ChunkShaderOptions options, boolean coloredLighting) {
+    public ChunkShaderInterface(ShaderBindingContext context, ChunkShaderOptions options, boolean coloredLighting, boolean analyticLighting) {
         this.uniformModelViewMatrix = context.bindUniform("u_ModelViewMatrix", GlUniformMatrix4f::new);
         this.uniformProjectionMatrix = context.bindUniform("u_ProjectionMatrix", GlUniformMatrix4f::new);
         this.uniformRegionOffset = context.bindUniform("u_RegionOffset", GlUniformFloat3v::new);
@@ -54,17 +67,37 @@ public class ChunkShaderInterface {
         this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
 
         if (coloredLighting) {
+            this.uniformHandLight = context.bindUniform("u_HandLight", GlUniformFloat4v::new);
+            this.uniformHandLightColor = context.bindUniform("u_HandLightColor", GlUniformFloat3v::new);
+        } else {
+            this.uniformHandLight = null;
+            this.uniformHandLightColor = null;
+        }
+
+        if (coloredLighting && !analyticLighting) {
             this.uniformColorLightTex = context.bindUniform("u_ColorLightTex", GlUniformInt::new);
             this.uniformColorLightOrigin = context.bindUniform("u_ColorLightOrigin", GlUniformFloat3v::new);
             this.uniformColorLightScale = context.bindUniform("u_ColorLightScale", GlUniformFloat3v::new);
-            this.uniformHandLight = context.bindUniform("u_HandLight", GlUniformFloat4v::new);
-            this.uniformHandLightColor = context.bindUniform("u_HandLightColor", GlUniformFloat3v::new);
         } else {
             this.uniformColorLightTex = null;
             this.uniformColorLightOrigin = null;
             this.uniformColorLightScale = null;
-            this.uniformHandLight = null;
-            this.uniformHandLightColor = null;
+        }
+
+        if (analyticLighting) {
+            this.uniformLightPos = context.bindUniform("u_LightPos", GlUniformFloat4Array::new);
+            this.uniformLightColor = context.bindUniform("u_LightColor", GlUniformFloat3Array::new);
+            this.uniformLightCount = context.bindUniform("u_LightCount", GlUniformInt::new);
+
+            int maxLights = ColoredLighting.getMaxLights();
+            this.lightPositions = new float[maxLights * 4];
+            this.lightColors = new float[maxLights * 3];
+        } else {
+            this.uniformLightPos = null;
+            this.uniformLightColor = null;
+            this.uniformLightCount = null;
+            this.lightPositions = null;
+            this.lightColors = null;
         }
 
         this.fogShader = options.fog().getFactory().apply(context);
@@ -75,6 +108,8 @@ public class ChunkShaderInterface {
         this.bindTexture(ChunkShaderTextureSlot.BLOCK, TextureUtil.getBlockTextureId());
         this.bindTexture(ChunkShaderTextureSlot.LIGHT, TextureUtil.getLightTextureId());
 
+        Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
+
         if (this.uniformColorLightTex != null) {
             // Unit 2 is free: the block atlas is 0 and the lightmap is 1. The colored-light
             // texture is a normal 2D atlas, so GlStateManager can bind it without the 3D-target
@@ -82,8 +117,6 @@ public class ChunkShaderInterface {
             GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 2);
             GlStateManager._bindTexture(ColoredLighting.getTextureId());
             this.uniformColorLightTex.setInt(2);
-
-            Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
 
             // The shader works in camera-relative world space, so the grid origin moves with the
             // camera instead of with the player. The grid itself stays anchored to the world.
@@ -97,12 +130,21 @@ public class ChunkShaderInterface {
                     ColoredLighting.getScaleY(),
                     ColoredLighting.getScaleZ());
 
+            // Leave the texture unit in the state the next renderer expects.
+            GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
+        }
+
+        if (this.uniformHandLight != null) {
             ColoredLighting.writeHandLight(cameraPos, this.handLight, this.handColor);
             this.uniformHandLight.set(this.handLight);
             this.uniformHandLightColor.set(this.handColor);
+        }
 
-            // Leave the texture unit in the state the next renderer expects.
-            GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
+        if (this.uniformLightPos != null) {
+            AnalyticLighting.writeUniforms(cameraPos, this.lightPositions, this.lightColors);
+            this.uniformLightPos.set(this.lightPositions);
+            this.uniformLightColor.set(this.lightColors);
+            this.uniformLightCount.setInt(AnalyticLighting.getCount());
         }
 
         var textureAtlas = (SpriteAtlasTextureAccessor) MinecraftClient.getInstance()

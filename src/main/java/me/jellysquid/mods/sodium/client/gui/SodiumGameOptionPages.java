@@ -691,10 +691,10 @@ public class SodiumGameOptionPages {
                                 + "#version 320 es, que o MobileGlues reconhece como já traduzido e manda tal e qual ao "
                                 + "driver, sem tradução. Os dois caminhos são opcionais e exclusivos: o controlo roda por "
                                 + "Desligado, GLSL e ESSL.\n\n"
-                                + "O que afeta: troca a rampa única do lightmap por uma grelha de 32x16x32 blocos à volta "
-                                + "do jogador, com a cor de cada fonte (tocha, alma, lava, portais, ametista, sculk, "
-                                + "frogluz, velas e outras). A grelha é refeita várias vezes por segundo e enviada como "
-                                + "textura 2D em atlas; nenhum chunk é reconstruído. "
+                                + "O que afeta: troca a rampa única do lightmap pela cor de cada fonte (tocha, alma, "
+                                + "lava, portais, ametista, sculk, frogluz, velas e outras). O motor escolhido "
+                                + "abaixo decide se essa cor vem de um atlas 2D ou de uma lista de uniformes; "
+                                + "nenhum chunk é reconstruído. "
                                 + "Com um shaderpack do Iris ativo fica desligado, porque o Iris substitui o shader do "
                                 + "Sodium. Aplicar recarrega o renderizador." + irisNote))
                         .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.LightingPath.class, new Text[] {
@@ -705,6 +705,35 @@ public class SodiumGameOptionPages {
                             }
                             opts.experimental.lighting = value;
                         }, opts -> opts.experimental.lighting == null ? SodiumGameOptions.LightingPath.OFF : opts.experimental.lighting)
+                        .setImpact(OptionImpact.MEDIUM)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                        .setEnabled(!iris)
+                        .build())
+                .add(OptionImpl.createBuilder(SodiumGameOptions.LightEngine.class, sodiumOpts)
+                        .setName(Text.literal("Motor de Luz"))
+                        .setTooltip(Text.literal("Escolhe como a luz colorida é calculada.\n\n"
+                                + "Grelha: um atlas 2D de 32x16x32 blocos à volta do jogador, refeito só quando "
+                                + "andas 8 blocos ou um bloco muda; o shader lê uma cor por posição. É o modo "
+                                + "antigo, agora ancorado ao mundo (deixa de piscar).\n\n"
+                                + "Analítico: não usa textura nenhuma. O jogo mantém uma lista das luzes mais "
+                                + "próximas (até 24, ou menos se o driver tiver poucos uniforms) e o shader soma "
+                                + "cada uma com a mesma curva quadrática de 12 blocos da luz na mão. O chão fica "
+                                + "com exatamente a mesma intensidade e cor da mão, e não há upload, logo não há "
+                                + "piscar possível. As luzes fora do alcance da lista ficam com a rampa quente "
+                                + "vanilla.\n\n"
+                                + "Nos dois modos a cor só aparece onde existe luz de bloco vanilla, por isso não "
+                                + "atravessa paredes nem acende cavernas escuras.\n\n"
+                                + "O que afeta: o Analítico custa por vértice conforme o número de luzes e está "
+                                + "limitado às mais próximas; a Grelha custa uma leitura fixa. Mudar de motor "
+                                + "recarrega o renderizador."))
+                        .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.LightEngine.class, new Text[] {
+                                Text.literal("Grelha (atlas 2D)"), Text.literal("Analítico (uniforms)") }))
+                        .setBinding((opts, value) -> {
+                            if (opts.experimental.lightEngine != value) {
+                                ColoredLighting.resetShaderFailure();
+                            }
+                            opts.experimental.lightEngine = value;
+                        }, opts -> opts.experimental.lightEngine == null ? SodiumGameOptions.LightEngine.GRID : opts.experimental.lightEngine)
                         .setImpact(OptionImpact.MEDIUM)
                         .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
                         .setEnabled(!iris)

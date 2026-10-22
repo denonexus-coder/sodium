@@ -44,25 +44,44 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options) {
         boolean colored = ColoredLighting.isActive();
 
+        if (!colored) {
+            return createShader(path, options, false, false, 0);
+        }
+
+        boolean analytic = ColoredLighting.useAnalytic();
+        int maxLights = analytic ? ColoredLighting.getMaxLights() : 0;
+
         try {
-            return createShader(path, options, colored);
+            return createShader(path, options, true, analytic, maxLights);
         } catch (RuntimeException e) {
-            if (!colored) {
-                throw e;
+            if (analytic) {
+                // A driver that rejects the uniform list must not lose the whole feature: rebuild
+                // the same program with the grid engine before falling back to no colored light.
+                SodiumClientMod.logger().error("Analytic colored-light shader failed to compile; falling back to the grid engine", e);
+                ColoredLighting.markAnalyticFailed();
+
+                try {
+                    return createShader(path, options, true, false, 0);
+                } catch (RuntimeException nested) {
+                    return fallbackShader(path, options, nested);
+                }
             }
 
-            // A driver that rejects the colored program must not take the whole renderer with it.
-            // The world falls back to the normal light path and the flag stays off until the game
-            // is restarted, so a broken shader costs one failed compile, not a crash loop.
-            SodiumClientMod.logger().error("Colored lighting shader failed to compile; falling back", e);
-            ColoredLighting.markShaderFailed();
-
-            return createShader(path, options, false);
+            return fallbackShader(path, options, e);
         }
     }
 
-    private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options, boolean colored) {
-        ShaderConstants constants = options.constants(colored);
+    private GlProgram<ChunkShaderInterface> fallbackShader(String path, ChunkShaderOptions options, RuntimeException e) {
+        // The world falls back to the normal light path and the flag stays off until the game
+        // is restarted, so a broken shader costs one failed compile, not a crash loop.
+        SodiumClientMod.logger().error("Colored lighting shader failed to compile; falling back", e);
+        ColoredLighting.markShaderFailed();
+
+        return createShader(path, options, false, false, 0);
+    }
+
+    private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options, boolean colored, boolean analytic, int maxLights) {
+        ShaderConstants constants = options.constants(colored, analytic, maxLights);
         boolean essl = colored && ColoredLighting.isEssl();
 
         GlShader vertShader = ShaderLoader.loadShader(ShaderType.VERTEX,
@@ -80,7 +99,7 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                     .bindAttribute("a_TexCoord", ChunkShaderBindingPoints.ATTRIBUTE_TEXTURE)
                     .bindAttribute("a_LightAndData", ChunkShaderBindingPoints.ATTRIBUTE_LIGHT_MATERIAL_INDEX)
                     .bindFragmentData("fragColor", ChunkShaderBindingPoints.FRAG_COLOR)
-                    .link((shader) -> new ChunkShaderInterface(shader, options, colored));
+                    .link((shader) -> new ChunkShaderInterface(shader, options, colored, analytic));
         } finally {
             vertShader.delete();
             fragShader.delete();
