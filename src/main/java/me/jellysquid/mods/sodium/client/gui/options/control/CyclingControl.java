@@ -69,21 +69,12 @@ public class CyclingControl<T extends Enum<T>> implements Control<T> {
     private static class CyclingControlElement<T extends Enum<T>> extends ControlElement<T> {
         private final T[] allowedValues;
         private final Text[] names;
-        private int currentIndex;
 
         public CyclingControlElement(Option<T> option, Dim2i dim, T[] allowedValues, Text[] names) {
             super(option, dim);
 
             this.allowedValues = allowedValues;
             this.names = names;
-            this.currentIndex = 0;
-
-            for (int i = 0; i < allowedValues.length; i++) {
-                if (allowedValues[i] == option.getValue()) {
-                    this.currentIndex = i;
-                    break;
-                }
-            }
         }
 
         @Override
@@ -122,12 +113,26 @@ public class CyclingControl<T extends Enum<T>> implements Control<T> {
         }
 
         public void cycleControl(boolean reverse) {
-            if (reverse) {
-                this.currentIndex = (this.currentIndex + this.allowedValues.length - 1) % this.allowedValues.length;
-            } else {
-                this.currentIndex = (this.currentIndex + 1) % this.allowedValues.length;
+            // Read the value that is on screen instead of a cached index. Options can change
+            // without going through this control (Undo, and the bulk Vanillin row aggregating
+            // the rows below it), and the next click must start from what the player sees.
+            T current = this.option.getValue();
+            int index = 0;
+
+            for (int i = 0; i < this.allowedValues.length; i++) {
+                if (this.allowedValues[i] == current) {
+                    index = i;
+                    break;
+                }
             }
-            this.option.setValue(this.allowedValues[this.currentIndex]);
+
+            if (reverse) {
+                index = (index + this.allowedValues.length - 1) % this.allowedValues.length;
+            } else {
+                index = (index + 1) % this.allowedValues.length;
+            }
+
+            this.option.setValue(this.allowedValues[index]);
         }
     }
 }

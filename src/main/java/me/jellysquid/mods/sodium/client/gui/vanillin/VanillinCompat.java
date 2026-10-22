@@ -247,31 +247,6 @@ public final class VanillinCompat {
 	}
 
 	/**
-	 * The state shared by every row, or {@link VanillinBulkState#MIXED} when the rows disagree.
-	 * The bulk control uses this to show the real state instead of silently adopting one row's
-	 * value as if it were global.
-	 */
-	public static VanillinBulkState commonState() {
-		if (ENTRIES.isEmpty()) {
-			return VanillinBulkState.MIXED;
-		}
-
-		VanillinState first = get(ENTRIES.get(0));
-
-		for (int i = 1; i < ENTRIES.size(); i++) {
-			if (get(ENTRIES.get(i)) != first) {
-				return VanillinBulkState.MIXED;
-			}
-		}
-
-		return switch (first) {
-			case DEFAULT -> VanillinBulkState.DEFAULT;
-			case DISABLE -> VanillinBulkState.DISABLE;
-			case FORCE_ENABLE -> VanillinBulkState.FORCE_ENABLE;
-		};
-	}
-
-	/**
 	 * Writes one state to every visual. This is the binding behind the bulk row; the caller still
 	 * owns the apply cycle, so nothing is written to disk or installed in the registry here.
 	 */

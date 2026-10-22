@@ -1,18 +1,23 @@
 package me.jellysquid.mods.sodium.client.gui.vanillin;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 
 import me.jellysquid.mods.sodium.client.gui.options.Option;
+import me.jellysquid.mods.sodium.client.gui.options.OptionFlag;
 import me.jellysquid.mods.sodium.client.gui.options.OptionGroup;
 import me.jellysquid.mods.sodium.client.gui.options.OptionImpact;
 import me.jellysquid.mods.sodium.client.gui.options.OptionImpl;
 import me.jellysquid.mods.sodium.client.gui.options.OptionPage;
+import me.jellysquid.mods.sodium.client.gui.options.control.Control;
 import me.jellysquid.mods.sodium.client.gui.options.control.CyclingControl;
 import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
+import me.jellysquid.mods.sodium.client.gui.options.storage.OptionStorage;
 import net.minecraft.text.Text;
 import org.jetbrains.annotations.Nullable;
 
@@ -204,26 +209,31 @@ public final class VanillinOptionsPage {
 			return null;
 		}
 
+		List<Option<VanillinState>> blockEntities = new ArrayList<>();
+		for (VanillinCompat.Entry entry : VanillinCompat.blockEntityEntries()) {
+			blockEntities.add(visualOption(entry));
+		}
+
+		List<Option<VanillinState>> entities = new ArrayList<>();
+		for (VanillinCompat.Entry entry : VanillinCompat.entityEntries()) {
+			entities.add(visualOption(entry));
+		}
+
+		// The bulk row looks at the same option objects as the rows below it, not at the saved
+		// maps. That way it switches to "Misto" as soon as one row has an unsaved edit, and a
+		// click on another bulk state is never mistaken for a no-op because of a stale snapshot.
+		List<Option<VanillinState>> visuals = new ArrayList<>(blockEntities);
+		visuals.addAll(entities);
+
 		List<OptionGroup> groups = new ArrayList<>();
 
 		groups.add(OptionGroup.createBuilder()
 				.setName(Text.literal("Estado"))
 				.add(introRow())
-				.add(bulkRow())
+				.add(bulkRow(visuals))
 				.build());
 
-		List<Option<?>> blockEntities = new ArrayList<>();
-		for (VanillinCompat.Entry entry : VanillinCompat.blockEntityEntries()) {
-			blockEntities.add(visualOption(entry));
-		}
-
 		addGroup(groups, blockEntities, Text.literal("Block entities"));
-
-		List<Option<?>> entities = new ArrayList<>();
-		for (VanillinCompat.Entry entry : VanillinCompat.entityEntries()) {
-			entities.add(visualOption(entry));
-		}
-
 		addGroup(groups, entities, Text.literal("Entidades"));
 
 		return new OptionPage(Text.literal("Vanillin"), ImmutableList.copyOf(groups));
@@ -233,7 +243,7 @@ public final class VanillinOptionsPage {
 	 * Wraps a list of options in a group, skipping it when empty. A group with no options renders
 	 * as a bare heading with nothing under it, which reads as a bug rather than as an absence.
 	 */
-	private static void addGroup(List<OptionGroup> groups, List<Option<?>> options, Text name) {
+	private static void addGroup(List<OptionGroup> groups, List<? extends Option<?>> options, Text name) {
 		if (options.isEmpty()) {
 			return;
 		}
@@ -282,34 +292,145 @@ public final class VanillinOptionsPage {
 	 * the per-visual rows come after it in the group list: a bulk change establishes the baseline
 	 * and any row the player also edited still wins.
 	 */
-	private static Option<VanillinBulkState> bulkRow() {
-		return OptionImpl.createBuilder(VanillinBulkState.class, VanillinOptionsStorage.INSTANCE)
-				.setName(Text.literal("Todos os visuais"))
-				.setTooltip(Text.literal(
-						"Aplica um estado a todas as linhas desta página de uma vez.\n\n"
-								+ "Padrão: todos voltam à decisão do Vanillin — estáveis ligados, experimentais "
-								+ "desligados fora de desenvolvimento.\n"
-								+ "Vanilla: remove todos os visualizadores; cada objeto volta ao renderizador vanilla.\n"
-								+ "Forçar instância: instala todos, incluindo os experimentais.\n"
-								+ "Misto: não é uma escolha; aparece quando as linhas já não estão todas no mesmo "
-								+ "estado. Escolher Misto não altera nada.\n\n"
-								+ "As linhas individuais continuam a mandar: se também alterares uma delas, a escolha "
-								+ "dessa linha prevalece sobre a escolha global.\n\n"
-								+ "Aplicar grava o resultado no vanillin.json e recarrega o renderizador para os "
-								+ "objetos que já estão no ecrã passarem a usar a escolha nova."))
-				.setControl(option -> new CyclingControl<>(option, VanillinBulkState.class, new Text[]{
-						Text.literal("Padrão"),
-						Text.literal("Vanilla"),
-						Text.literal("Forçar"),
-						Text.literal("Misto")
-				}))
-				.setImpact(OptionImpact.MEDIUM)
-				.setBinding((data, value) -> {
-					if (value != null) {
-						VanillinCompat.setAll(value.toState());
-					}
-				}, data -> VanillinCompat.commonState())
-				.build();
+	private static Option<VanillinBulkState> bulkRow(List<Option<VanillinState>> visuals) {
+		return new BulkOption(visuals);
+	}
+
+	/**
+	 * The page-wide control. It is implemented here rather than as an {@link OptionImpl} because
+	 * its value is not a stored field: it is the state of the rows below it, including edits that
+	 * have not been applied yet. Reading those rows keeps the row on "Misto" while they disagree
+	 * and makes selecting a state always count as a change, even when that state was also the
+	 * value when the screen opened.
+	 */
+	private static final class BulkOption implements Option<VanillinBulkState> {
+		private static final Text NAME = Text.literal("Todos os visuais");
+		private static final Text TOOLTIP = Text.literal(
+				"Aplica um estado a todas as linhas desta página de uma vez.\n\n"
+						+ "Padrão: todos voltam à decisão do Vanillin — estáveis ligados, experimentais "
+						+ "desligados fora de desenvolvimento.\n"
+						+ "Vanilla: remove todos os visualizadores; cada objeto volta ao renderizador vanilla.\n"
+						+ "Forçar instância: instala todos, incluindo os experimentais.\n"
+						+ "Misto: não é uma escolha; aparece quando as linhas já não estão todas no mesmo "
+						+ "estado. Escolher Misto não altera nada.\n\n"
+						+ "As linhas individuais continuam a mandar: se também alterares uma delas, a escolha "
+						+ "dessa linha prevalece sobre a escolha global.\n\n"
+						+ "Aplicar grava o resultado no vanillin.json e recarrega o renderizador para os "
+						+ "objetos que já estão no ecrã passarem a usar a escolha nova.");
+
+		private final List<Option<VanillinState>> visuals;
+		private final Control<VanillinBulkState> control;
+		private VanillinBulkState pending;
+
+		private BulkOption(List<Option<VanillinState>> visuals) {
+			this.visuals = visuals;
+			this.control = new CyclingControl<>(this, VanillinBulkState.class, new Text[]{
+					Text.literal("Padrão"),
+					Text.literal("Vanilla"),
+					Text.literal("Forçar"),
+					Text.literal("Misto")
+			});
+		}
+
+		@Override
+		public Text getName() {
+			return NAME;
+		}
+
+		@Override
+		public Text getTooltip() {
+			return TOOLTIP;
+		}
+
+		@Override
+		public OptionImpact getImpact() {
+			return OptionImpact.MEDIUM;
+		}
+
+		@Override
+		public Control<VanillinBulkState> getControl() {
+			return this.control;
+		}
+
+		@Override
+		public VanillinBulkState getValue() {
+			if (this.pending != null) {
+				return this.pending;
+			}
+
+			if (this.visuals.isEmpty()) {
+				return VanillinBulkState.MIXED;
+			}
+
+			VanillinState first = this.visuals.get(0).getValue();
+			if (first == null) {
+				return VanillinBulkState.MIXED;
+			}
+
+			for (int i = 1; i < this.visuals.size(); i++) {
+				if (this.visuals.get(i).getValue() != first) {
+					return VanillinBulkState.MIXED;
+				}
+			}
+
+			return switch (first) {
+				case DEFAULT -> VanillinBulkState.DEFAULT;
+				case DISABLE -> VanillinBulkState.DISABLE;
+				case FORCE_ENABLE -> VanillinBulkState.FORCE_ENABLE;
+			};
+		}
+
+		@Override
+		public void setValue(VanillinBulkState value) {
+			this.pending = value;
+		}
+
+		@Override
+		public void reset() {
+			this.pending = null;
+		}
+
+		@Override
+		public OptionStorage<?> getStorage() {
+			return VanillinOptionsStorage.INSTANCE;
+		}
+
+		@Override
+		public boolean isAvailable() {
+			return true;
+		}
+
+		@Override
+		public boolean hasChanged() {
+			return this.pending != null && this.pending != VanillinBulkState.MIXED;
+		}
+
+		@Override
+		public void applyChanges() {
+			VanillinBulkState value = this.pending;
+			this.pending = null;
+
+			if (value == null || value == VanillinBulkState.MIXED) {
+				return;
+			}
+
+			VanillinState state = value.toState();
+			VanillinCompat.setAll(state);
+
+			for (Option<VanillinState> visual : this.visuals) {
+				if (!visual.hasChanged()) {
+					// Mark untouched rows with the value now in the map so they repaint. A row the
+					// player edited keeps its own pending value and is applied after this option,
+					// which is the documented precedence.
+					visual.setValue(state);
+				}
+			}
+		}
+
+		@Override
+		public Collection<OptionFlag> getFlags() {
+			return Collections.emptyList();
+		}
 	}
 
 	/**
