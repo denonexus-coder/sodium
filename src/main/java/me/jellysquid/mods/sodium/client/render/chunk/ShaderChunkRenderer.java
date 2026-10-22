@@ -135,9 +135,11 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
 
         // Iris owns the render path whenever it is installed. The shadow and reflection controls
         // are Sodium shader features, so they are forced off here even if the config file still
-        // has them on from a run without Iris.
+        // has them on from a run without Iris. The reverse-order pass is translucent terrain
+        // (water, stained glass); the option is about opaque surfaces, so it is left alone there.
         boolean surfaceReflection = SodiumClientMod.options().experimental.surfaceReflection
-                && !ColoredLighting.isIrisLoaded();
+                && !ColoredLighting.isIrisLoaded()
+                && !pass.isReverseOrder();
         ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType, surfaceReflection);
 
         this.activeProgram = this.compileProgram(options);
