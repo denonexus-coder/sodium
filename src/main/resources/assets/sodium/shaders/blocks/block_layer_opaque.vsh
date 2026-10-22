@@ -23,16 +23,29 @@ out vec3 v_SkyColor;
 out float v_SkyLight;
 #endif
 
+#ifdef MAKEUP_NO_EFFECTS
+out vec3 v_MakeupBlock;
+out float v_MakeupSky;
+out vec3 v_MakeupViewPos;
+out vec3 v_MakeupWorldPos;
+out float v_MaterialWater;
+out float v_MaterialTranslucent;
+#endif
+
 uniform int u_FogShape;
 uniform vec3 u_RegionOffset;
 uniform vec2 u_TexCoordShrink;
 
 uniform sampler2D u_LightTex; // The light map texture sampler
 
-#ifdef COLORED_LIGHTING
+// The hand light is shared by the colored-light path and the MakeUp profile. With neither one
+// compiled in, the uniforms do not exist and the program does not pay for them.
+#if defined(COLORED_LIGHTING) || defined(MAKEUP_NO_EFFECTS)
 uniform vec4 u_HandLight;          // xyz: camera-relative hand position, w: intensity
 uniform vec3 u_HandLightColor;
+#endif
 
+#ifdef COLORED_LIGHTING
 // Positions in this shader are camera-relative. The shadow depth needs absolute world height,
 // so the camera's Y is passed separately instead of being folded into every vertex.
 uniform float u_CameraY;
@@ -55,10 +68,12 @@ uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
 uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
 #endif
 
-vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
-    // The block column of the vanilla lightmap is a single warm ramp, so it is not used here:
-    // only the sky column is sampled, and the block term is computed below.
-    vec3 sky = texture(u_LightTex, vec2(0.0, lightCoord.y)).rgb;
+/**
+ * The block part of the colored-light model. The profile also uses this, so a torch keeps its
+ * color while the sky and the direct sun come from MakeUp's palette.
+ */
+vec3 _colored_block(vec3 worldPos, vec2 lightCoord, out vec3 tint, out float colorAmount) {
+    tint = vec3(0.0);
 
 #ifdef ANALYTIC_LIGHTING
     // Identical curve to the hand light below: same 12-block radius, same squared falloff.
@@ -107,8 +122,9 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
     // Keep the warm base only where no colored source reaches, so a distant lit area that was
     // not scanned still looks like vanilla instead of going black.
     vec3 warm = vec3(0.62, 0.50, 0.32) * lightCoord.x;
-    float colorAmount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
+    colorAmount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
     vec3 block = mix(warm, colored, colorAmount);
+    tint = colored;
 
     if (u_HandLight.w > 0.0) {
         vec3 delta = worldPos - u_HandLight.xyz;
@@ -116,6 +132,18 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
         float atten = max(0.0, 1.0 - distSq * (1.0 / 144.0));
         block += u_HandLightColor * (atten * atten * u_HandLight.w);
     }
+
+    return block;
+}
+
+vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
+    // The block column of the vanilla lightmap is a single warm ramp, so it is not used here:
+    // only the sky column is sampled, and the block term is computed below.
+    vec3 sky = texture(u_LightTex, vec2(0.0, lightCoord.y)).rgb;
+
+    vec3 tint;
+    float colorAmount;
+    vec3 block = _colored_block(worldPos, lightCoord, tint, colorAmount);
 
     vec3 ambient = sky * 0.90;
 
@@ -137,7 +165,7 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
         // Daylight shadows lean blue; deep shadows lean violet. The colored-light hue is mixed in
         // so a torch-lit shadow keeps the color of the torch instead of turning grey.
         vec3 shade = mix(vec3(0.72, 0.82, 1.00), vec3(0.48, 0.38, 0.68), depthColor);
-        vec3 hue = colored / max(max(colored.r, colored.g), max(colored.b, 1.0e-4));
+        vec3 hue = tint / max(max(tint.r, tint.g), max(tint.b, 1.0e-4));
         shade = mix(shade, hue, u_ShadowTint * colorAmount);
 
         float amount = clamp(u_ShadowStrength * occlusion * depthWeight, 0.0, 1.0);
@@ -152,6 +180,8 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
     return clamp(ambient + block + vec3(0.06), 0.0, 1.30);
 }
 #endif
+
+#import <sodium:include/makeup.glsl>
 
 uvec3 _get_relative_chunk_coord(uint pos) {
     // Packing scheme is defined by LocalSectionIndex
@@ -186,12 +216,34 @@ void main() {
     v_SkyLight = _vert_tex_light_coord.y;
 #endif
 
-    // Add the light color to the vertex color, and pass the texture coordinates to the fragment shader
-#ifdef COLORED_LIGHTING
-    v_Color = _vert_color * vec4(_colored_light(position, _vert_tex_light_coord), 1.0);
+#ifdef MAKEUP_NO_EFFECTS
+    // The profile keeps the light components separate until the fragment shader, where the face
+    // normal is available. Sodium's chunk format has no normal attribute, so the fragment derives
+    // one from the view-space position with dFdx/dFdy.
+    v_MakeupViewPos = (u_ModelViewMatrix * vec4(position, 1.0)).xyz;
+    v_MakeupWorldPos = position + u_MakeupCameraPos;
+    v_MakeupSky = _makeup_visible_sky(_vert_tex_light_coord);
+
+    #ifdef COLORED_LIGHTING
+        vec3 makeupTint;
+        float makeupColorAmount;
+        v_MakeupBlock = _colored_block(position, _vert_tex_light_coord, makeupTint, makeupColorAmount);
+    #else
+        v_MakeupBlock = _makeup_block(position, _vert_tex_light_coord);
+    #endif
+
+    v_MaterialWater = _material_water(_material_params) ? 1.0 : 0.0;
+    v_MaterialTranslucent = _material_translucent(_material_params) ? 1.0 : 0.0;
+    v_Color = _vert_color;
 #else
-    v_Color = _vert_color * texture(u_LightTex, _vert_tex_light_coord);
+    // Add the light color to the vertex color, and pass the texture coordinates to the fragment shader
+    #ifdef COLORED_LIGHTING
+        v_Color = _vert_color * vec4(_colored_light(position, _vert_tex_light_coord), 1.0);
+    #else
+        v_Color = _vert_color * texture(u_LightTex, _vert_tex_light_coord);
+    #endif
 #endif
+
     v_TexCoord = (_vert_tex_diffuse_coord_bias * u_TexCoordShrink) + _vert_tex_diffuse_coord; // FMA for precision
 
     v_MaterialMipBias = _material_mip_bias(_material_params);

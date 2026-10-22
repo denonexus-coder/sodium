@@ -135,6 +135,46 @@ public class SodiumGameOptions {
 
         /** 0..100. Fresnel exponent; higher values keep the sheen at grazing angles only. */
         public int reflectionSoftness = 50;
+
+        /**
+         * The MakeUp "No Effects" profile, rebuilt inside the chunk shader instead of running the
+         * shader pack. It is deliberately independent from the colored shadows and the surface
+         * reflection: those keep their own switches and can be combined with this profile.
+         */
+        public boolean makeupNoEffects = false;
+
+        /** The profile's own sky gradient, sun, moon and stars (Overworld only). */
+        public boolean makeupSky = true;
+
+        /** MakeUp-style distance fog using the horizon colour of the profile sky. */
+        public boolean makeupFog = true;
+
+        /** Water tint and the sky reflection on water and glass. */
+        public boolean makeupWater = true;
+
+        /** 0..80, in percent. The exact profile value is 10 (0.10). */
+        public int makeupWaterAbsorption = 10;
+
+        /** The profile keeps the sky reflection on water/glass, but not the sun glint. */
+        public boolean makeupWaterSkyReflection = true;
+
+        /** Analytic normal waves on water; the exact profile value is WATER_TURBULENCE 0.9. */
+        public boolean makeupWaterWaves = true;
+
+        /** 0..100. Scales the analytic wave normal; 90 matches the profile's 0.9. */
+        public int makeupWaterWaveStrength = 90;
+
+        /** 5..70. The exact profile value is NIGHT_BRIGHT 0.60. */
+        public int makeupNightBrightness = 60;
+
+        /** 0..60, shown as 0.000..0.060. The exact profile value is AVOID_DARK_LEVEL 0.030. */
+        public int makeupMinCaveLight = 30;
+
+        /** 0..4. The exact profile value is BLOCKLIGHT_TEMP 1. */
+        public int makeupBlockLightTemp = 1;
+
+        /** The profile's directional sun without a shadow map; the grass is lit by N·L. */
+        public boolean makeupSunLight = true;
     }
 
     public enum LightEngine {

@@ -882,6 +882,216 @@ public class SodiumGameOptionPages {
                 .add(new GatedOption<>(reflectionSoftness, reflectionDetails))
                 .build());
 
+        Option<Boolean> profileNoEffects = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Perfil MakeUp No Effects"))
+                .setTooltip(Text.literal("Reproduz o perfil No Effects do MakeUp dentro do shader de chunks do Sodium, sem "
+                        + "correr o shaderpack. Mantém o céu e a névoa próprios, a água com absorção 0.10 e "
+                        + "reflexo do céu, as ondas da água, o brilho nocturno 0.60, a luz mínima de caverna "
+                        + "0.030, a temperatura da luz de bloco 1, a luz na mão e as nuvens vanilla. O perfil "
+                        + "não inclui sombras, SSR, AO, AA, DoF, motion blur, bloom, aberração cromática, "
+                        + "godrays, movimento das folhas, nuvens volumétricas, reflexo das nuvens, brilho dos "
+                        + "materiais, refração nem brilho do sol/lua. As sombras coloridas continuam a ser "
+                        + "uma opção à parte, mas o modelo do perfil não tem sombras: com o perfil ligado, "
+                        + "essa opção não altera o terreno. O reflexo de superfície do Sodium, se estiver "
+                        + "ligado, continua a ser aplicado nas passagens opacas.\n\n"
+                        + "O que afeta: só o terreno, a água, o céu e a névoa. Entidades, mão e partículas "
+                        + "continuam com o sombreado vanilla/Sodium. No Nether e no End o perfil fica "
+                        + "desligado e o Sodium usa o caminho normal, com o céu e a névoa vanilla. Funciona "
+                        + "com a iluminação colorida ligada ou desligada: com ela "
+                        + "ligada, a luz de bloco usa as cores do Sodium; desligada, usa a paleta de vela do "
+                        + "MakeUp. Não é um shaderpack: não há shadow map, framebuffer extra, depth texture "
+                        + "nem cópia da cena.\n\n"
+                        + "Com o Iris instalado fica desligado, porque o Iris controla o shader do mundo. "
+                        + "Ligar ou desligar recarrega o renderizador; os restantes controlos são uniforms "
+                        + "lidos por frame." + newIrisNote))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupNoEffects = value,
+                        opts -> opts.experimental.makeupNoEffects)
+                .setImpact(OptionImpact.HIGH)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .setEnabled(!irisInstalled)
+                .build();
+
+        BooleanSupplier profileOn = () -> !irisInstalled && profileNoEffects.getValue();
+
+        Option<Boolean> profileSky = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Céu do perfil"))
+                .setTooltip(Text.literal("Desenha o gradiente do MakeUp, o sol, a lua, as estrelas e o brilho do "
+                        + "poente num único triângulo de ecrã inteiro. Usa a mesma paleta do terreno, por isso "
+                        + "o céu e o chão não ficam com cores diferentes ao pôr do sol. Só no Overworld.\n\n"
+                        + "O que afeta: substitui o céu vanilla; as nuvens continuam as vanilla. Não mexe no "
+                        + "terreno nem nos chunks."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupSky = value,
+                        opts -> opts.experimental.makeupSky)
+                .setImpact(OptionImpact.LOW)
+                .setEnabled(!irisInstalled)
+                .build();
+
+        Option<Boolean> profileFog = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Névoa do perfil"))
+                .setTooltip(Text.literal("Usa a curva de névoa do MakeUp, com a cor do horizonte em vez da cor da "
+                        + "cena. A intensidade sobe com a luz do céu e com a chuva; à noite e em cavernas "
+                        + "fecha menos. A distância é a distância de renderização atual.\n\n"
+                        + "O que afeta: só o terreno e a água. Não há cópia da cena, por isso a cor é uma "
+                        + "aproximação do horizonte e não a cor desfocada por trás da água. Só no Overworld."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupFog = value,
+                        opts -> opts.experimental.makeupFog)
+                .setImpact(OptionImpact.LOW)
+                .setEnabled(!irisInstalled)
+                .build();
+
+        Option<Boolean> profileWater = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Água e vidro"))
+                .setTooltip(Text.literal("Liga os efeitos de água do perfil: a tinta de absorção, as ondas e o "
+                        + "reflexo do céu. O reflexo também aparece no vidro, no gelo e nos restantes blocos "
+                        + "translúcidos, porque partilham a mesma passagem; a Absorção e as Ondas são só para "
+                        + "a água.\n\n"
+                        + "O que afeta: um bit novo no material do vértice, lido só por este shader. Não há "
+                        + "refração nem espelho da cena; o reflexo é a cor do céu com Fresnel. Desligado, a "
+                        + "água e o vidro ficam com o sombreado normal do Sodium."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupWater = value,
+                        opts -> opts.experimental.makeupWater)
+                .setImpact(OptionImpact.LOW)
+                .setEnabled(!irisInstalled)
+                .build();
+
+        BooleanSupplier waterOn = () -> profileOn.getAsBoolean() && profileWater.getValue();
+
+        Option<Integer> profileWaterAbsorption = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Absorção da água"))
+                .setTooltip(Text.literal("Quanto a água absorve a luz. O perfil usa 0.10; a 0.00 a tinta "
+                        + "desaparece e ficam só as ondas e o reflexo. Como o Sodium não tem depth texture "
+                        + "nem cópia da cena nesta passagem, o valor é aplicado por ângulo: quanto mais "
+                        + "rasante a vista, mais água o raio atravessa e mais forte é a tinta.\n\n"
+                        + "O que afeta: só as faces de água. É um uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 80, 1,
+                        value -> Text.literal(String.format(java.util.Locale.ROOT, "%.2f", value / 100.0F))))
+                .setBinding((opts, value) -> opts.experimental.makeupWaterAbsorption = value,
+                        opts -> opts.experimental.makeupWaterAbsorption)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Boolean> profileWaterReflection = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Reflexo do céu na água/vidro"))
+                .setTooltip(Text.literal("Mistura a cor do céu na água e no vidro com Fresnel. O perfil mantém "
+                        + "este reflexo, mas desliga o brilho do sol/lua: não há glint nem espelho da cena.\n\n"
+                        + "O que afeta: um uniform por frame. O céu refletido é o gradiente do horizonte e do "
+                        + "zénite, não uma segunda passagem da cena."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupWaterSkyReflection = value,
+                        opts -> opts.experimental.makeupWaterSkyReflection)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Boolean> profileWaterWaves = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Ondas da água"))
+                .setTooltip(Text.literal("Perturba a normal da superfície da água com duas senoides ancoradas ao "
+                        + "mundo. Não desloca vértices: a água continua plana, só a luz e o reflexo variam.\n\n"
+                        + "O que afeta: algumas instruções por fragmento de água. O valor do perfil é 0.9, "
+                        + "ajustável em baixo."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupWaterWaves = value,
+                        opts -> opts.experimental.makeupWaterWaves)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> profileWaterWaveStrength = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Força das ondas"))
+                .setTooltip(Text.literal("Escala a perturbação da normal. A 0% as ondas desaparecem; a 100% é "
+                        + "uma ondulação forte. O perfil usa 90%.\n\n"
+                        + "O que afeta: um uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.makeupWaterWaveStrength = value,
+                        opts -> opts.experimental.makeupWaterWaveStrength)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> profileNightBrightness = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Brilho nocturno"))
+                .setTooltip(Text.literal("Quanto o céu e a luz da noite iluminam o terreno. O perfil usa 0.60; "
+                        + "a fase da lua ainda multiplica este valor, como no MakeUp.\n\n"
+                        + "O que afeta: a paleta do céu, a luz ambiente e a névoa. É um uniform por frame."))
+                .setControl(option -> new SliderControl(option, 5, 70, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.makeupNightBrightness = value,
+                        opts -> opts.experimental.makeupNightBrightness)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> profileMinCaveLight = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Luz mínima em cavernas"))
+                .setTooltip(Text.literal("Chão mínimo da luz omni do perfil. O valor do MakeUp é 0.030: uma "
+                        + "caverna sem tochas não fica preta, fica com um azul muito escuro. A 0.000 fica "
+                        + "preta; acima de 0.060 perde o contraste das cavernas.\n\n"
+                        + "O que afeta: só a luz ambiente; não acende a luz de bloco nem atravessa paredes. "
+                        + "É um uniform por frame."))
+                .setControl(option -> new SliderControl(option, 0, 60, 5,
+                        value -> Text.literal(String.format(java.util.Locale.ROOT, "%.3f", value / 1000.0F))))
+                .setBinding((opts, value) -> opts.experimental.makeupMinCaveLight = value,
+                        opts -> opts.experimental.makeupMinCaveLight)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> profileBlockLightTemp = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Temperatura da luz de bloco"))
+                .setTooltip(Text.literal("Cor base da luz de vela/tocha no perfil. O MakeUp usa 1 (âmbar). "
+                        + "Quente puxa para laranja, Neutro para amarelo, Frio para branco-azulado e Branco "
+                        + "para cinzento.\n\n"
+                        + "O que afeta: a paleta da luz de bloco quando a iluminação colorida do Sodium está "
+                        + "desligada; com ela ligada, as cores das fontes continuam a mandar. É um uniform "
+                        + "por frame."))
+                .setControl(option -> new SliderControl(option, 0, 4, 1, value -> Text.literal(
+                        new String[] { "Quente", "Âmbar", "Neutro", "Frio", "Branco" }[value])))
+                .setBinding((opts, value) -> opts.experimental.makeupBlockLightTemp = value,
+                        opts -> opts.experimental.makeupBlockLightTemp)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Boolean> profileSunLight = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Sol direcional (N·L)"))
+                .setTooltip(Text.literal("Liga o sol do perfil sem shadow map: a face virada ao sol recebe a cor "
+                        + "directa, a face oposta perde-a. O termo só chega a superfícies que vêem o céu, com "
+                        + "a rampa ^10 do MakeUp; é isso que escurece telhados, cavernas e paredes viradas "
+                        + "para norte sem uma sombra desenhada.\n\n"
+                        + "O que afeta: um uniform por frame. Desligado, o terreno fica só com a luz omni e a "
+                        + "luz de bloco."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupSunLight = value,
+                        opts -> opts.experimental.makeupSunLight)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Boolean> profileHandLight = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Luz na mão no perfil"))
+                .setTooltip(Text.literal("Soma a luz do bloco segurado, com a mesma curva do MakeUp: a tocha na "
+                        + "mão ilumina o terreno à frente com a mesma intensidade de uma tocha colocada. Esta "
+                        + "opção é a mesma que a Luz na mão da iluminação colorida; o valor fica partilhado.\n\n"
+                        + "O que afeta: poucas instruções por vértice e um uniform por frame."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.handLight = value,
+                        opts -> opts.experimental.handLight)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("MakeUp No Effects"))
+                .add(profileNoEffects)
+                .add(new GatedOption<>(profileSky, profileOn))
+                .add(new GatedOption<>(profileFog, profileOn))
+                .add(new GatedOption<>(profileSunLight, profileOn))
+                .add(new GatedOption<>(profileHandLight, profileOn))
+                .add(new GatedOption<>(profileWater, profileOn))
+                .add(new GatedOption<>(profileWaterAbsorption, waterOn))
+                .add(new GatedOption<>(profileWaterReflection, waterOn))
+                .add(new GatedOption<>(profileWaterWaves, waterOn))
+                .add(new GatedOption<>(profileWaterWaveStrength, waterOn))
+                .add(new GatedOption<>(profileNightBrightness, profileOn))
+                .add(new GatedOption<>(profileMinCaveLight, profileOn))
+                .add(new GatedOption<>(profileBlockLightTemp, profileOn))
+                .build());
+
         return new OptionPage(Text.literal("Experimental"), ImmutableList.copyOf(groups));
     }
 

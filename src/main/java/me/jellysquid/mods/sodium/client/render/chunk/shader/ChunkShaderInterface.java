@@ -11,6 +11,7 @@ import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4Array;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformInt;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
+import me.jellysquid.mods.sodium.client.render.MakeupProfile;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.AnalyticLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.impl.CompactChunkVertex;
@@ -19,7 +20,9 @@ import me.jellysquid.mods.sodium.mixin.core.render.texture.SpriteAtlasTextureAcc
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.SpriteAtlasTexture;
 import net.minecraft.util.math.Vec3d;
+import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
+import org.joml.Vector3f;
 import org.lwjgl.opengl.GL32C;
 
 import java.util.EnumMap;
@@ -60,6 +63,34 @@ public class ChunkShaderInterface {
     private final GlUniformFloat uniformReflectionStrength;
     private final GlUniformFloat uniformReflectionSoftness;
 
+    // The MakeUp "No Effects" profile. The colors are computed once per pass on the CPU; the
+    // fragment shader only needs the derivative normal and the light it already interpolates.
+    private final GlUniformFloat3v uniformMakeupOmniColor;
+    private final GlUniformFloat3v uniformMakeupOmniMin;
+    private final GlUniformFloat3v uniformMakeupDirectColor;
+    private final GlUniformFloat3v uniformMakeupCandleColor;
+    private final GlUniformFloat3v uniformMakeupZenith;
+    private final GlUniformFloat3v uniformMakeupHorizon;
+    private final GlUniformFloat3v uniformMakeupWaterColor;
+    private final GlUniformFloat3v uniformMakeupFogColor;
+    private final GlUniformFloat3v uniformMakeupSunDirView;
+    private final GlUniformFloat3v uniformMakeupUpView;
+    private final GlUniformFloat3v uniformMakeupCameraPos;
+    private final GlUniformFloat uniformMakeupSun;
+    private final GlUniformFloat uniformMakeupWater;
+    private final GlUniformFloat uniformMakeupWaterAbsorption;
+    private final GlUniformFloat uniformMakeupWaterReflection;
+    private final GlUniformFloat uniformMakeupWaterWaves;
+    private final GlUniformFloat uniformMakeupWaveStrength;
+    private final GlUniformFloat uniformMakeupFog;
+    private final GlUniformFloat uniformMakeupFogDensity;
+    private final GlUniformFloat uniformMakeupEyeSky;
+    private final GlUniformFloat uniformMakeupRain;
+    private final GlUniformFloat uniformMakeupFar;
+    private final GlUniformFloat uniformMakeupTime;
+
+    private MakeupProfile.Frame makeupFrame;
+
     private final float[] handLight = new float[4];
     private final float[] handColor = new float[3];
     private final float[] lightPositions;
@@ -76,18 +107,32 @@ public class ChunkShaderInterface {
 
         this.uniformTextures = new EnumMap<>(ChunkShaderTextureSlot.class);
         this.uniformTextures.put(ChunkShaderTextureSlot.BLOCK, context.bindUniform("u_BlockTex", GlUniformInt::new));
-        this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
 
-        if (coloredLighting) {
+        // The profile reads raw lightmap coordinates instead of sampling the lightmap, and its
+        // colored-grid path uses u_ColorLightTex. u_LightTex is therefore dead in the profile
+        // unless the surface reflection samples it for its per-vertex sky colour. Drivers are
+        // free to eliminate dead samplers, so bind it only when it is really used.
+        if (!options.makeupProfile() || options.surfaceReflection()) {
+            this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
+        }
+
+        if (coloredLighting || options.makeupProfile()) {
             this.uniformHandLight = context.bindUniform("u_HandLight", GlUniformFloat4v::new);
             this.uniformHandLightColor = context.bindUniform("u_HandLightColor", GlUniformFloat3v::new);
+        } else {
+            this.uniformHandLight = null;
+            this.uniformHandLightColor = null;
+        }
+
+        // The shadow uniforms live in _colored_light, which the profile does not call: its light
+        // model has no shadow map and no colored-shadow ambient term. Binding them there would
+        // ask for uniforms that the linker is allowed to eliminate.
+        if (coloredLighting && !options.makeupProfile()) {
             this.uniformCameraY = context.bindUniform("u_CameraY", GlUniformFloat::new);
             this.uniformShadowStrength = context.bindUniform("u_ShadowStrength", GlUniformFloat::new);
             this.uniformShadowDepth = context.bindUniform("u_ShadowDepth", GlUniformFloat::new);
             this.uniformShadowTint = context.bindUniform("u_ShadowTint", GlUniformFloat::new);
         } else {
-            this.uniformHandLight = null;
-            this.uniformHandLightColor = null;
             this.uniformCameraY = null;
             this.uniformShadowStrength = null;
             this.uniformShadowDepth = null;
@@ -100,6 +145,62 @@ public class ChunkShaderInterface {
         } else {
             this.uniformReflectionStrength = null;
             this.uniformReflectionSoftness = null;
+        }
+
+        if (options.makeupProfile()) {
+            this.uniformMakeupOmniColor = context.bindUniform("u_MakeupOmniColor", GlUniformFloat3v::new);
+            this.uniformMakeupOmniMin = context.bindUniform("u_MakeupOmniMin", GlUniformFloat3v::new);
+            this.uniformMakeupDirectColor = context.bindUniform("u_MakeupDirectColor", GlUniformFloat3v::new);
+            // With the colored engine on, the block term comes from _colored_block and the
+            // profile's candle palette is dead code. Drivers are free to eliminate it, so only
+            // bind it when the warm fallback is actually compiled in.
+            this.uniformMakeupCandleColor = coloredLighting
+                    ? null
+                    : context.bindUniform("u_MakeupCandleColor", GlUniformFloat3v::new);
+            this.uniformMakeupZenith = context.bindUniform("u_MakeupZenith", GlUniformFloat3v::new);
+            this.uniformMakeupHorizon = context.bindUniform("u_MakeupHorizon", GlUniformFloat3v::new);
+            this.uniformMakeupWaterColor = context.bindUniform("u_MakeupWaterColor", GlUniformFloat3v::new);
+            this.uniformMakeupFogColor = context.bindUniform("u_MakeupFogColor", GlUniformFloat3v::new);
+            this.uniformMakeupSunDirView = context.bindUniform("u_MakeupSunDirView", GlUniformFloat3v::new);
+            this.uniformMakeupUpView = context.bindUniform("u_MakeupUpView", GlUniformFloat3v::new);
+            this.uniformMakeupCameraPos = context.bindUniform("u_MakeupCameraPos", GlUniformFloat3v::new);
+
+            this.uniformMakeupSun = context.bindUniform("u_MakeupSun", GlUniformFloat::new);
+            this.uniformMakeupWater = context.bindUniform("u_MakeupWater", GlUniformFloat::new);
+            this.uniformMakeupWaterAbsorption = context.bindUniform("u_MakeupWaterAbsorption", GlUniformFloat::new);
+            this.uniformMakeupWaterReflection = context.bindUniform("u_MakeupWaterReflection", GlUniformFloat::new);
+            this.uniformMakeupWaterWaves = context.bindUniform("u_MakeupWaterWaves", GlUniformFloat::new);
+            this.uniformMakeupWaveStrength = context.bindUniform("u_MakeupWaveStrength", GlUniformFloat::new);
+            this.uniformMakeupFog = context.bindUniform("u_MakeupFog", GlUniformFloat::new);
+            this.uniformMakeupFogDensity = context.bindUniform("u_MakeupFogDensity", GlUniformFloat::new);
+            this.uniformMakeupEyeSky = context.bindUniform("u_MakeupEyeSky", GlUniformFloat::new);
+            this.uniformMakeupRain = context.bindUniform("u_MakeupRain", GlUniformFloat::new);
+            this.uniformMakeupFar = context.bindUniform("u_MakeupFar", GlUniformFloat::new);
+            this.uniformMakeupTime = context.bindUniform("u_MakeupTime", GlUniformFloat::new);
+        } else {
+            this.uniformMakeupOmniColor = null;
+            this.uniformMakeupOmniMin = null;
+            this.uniformMakeupDirectColor = null;
+            this.uniformMakeupCandleColor = null;
+            this.uniformMakeupZenith = null;
+            this.uniformMakeupHorizon = null;
+            this.uniformMakeupWaterColor = null;
+            this.uniformMakeupFogColor = null;
+            this.uniformMakeupSunDirView = null;
+            this.uniformMakeupUpView = null;
+            this.uniformMakeupCameraPos = null;
+            this.uniformMakeupSun = null;
+            this.uniformMakeupWater = null;
+            this.uniformMakeupWaterAbsorption = null;
+            this.uniformMakeupWaterReflection = null;
+            this.uniformMakeupWaterWaves = null;
+            this.uniformMakeupWaveStrength = null;
+            this.uniformMakeupFog = null;
+            this.uniformMakeupFogDensity = null;
+            this.uniformMakeupEyeSky = null;
+            this.uniformMakeupRain = null;
+            this.uniformMakeupFar = null;
+            this.uniformMakeupTime = null;
         }
 
         if (coloredLighting && !analyticLighting) {
@@ -166,7 +267,42 @@ public class ChunkShaderInterface {
             ColoredLighting.writeHandLight(cameraPos, this.handLight, this.handColor);
             this.uniformHandLight.set(this.handLight);
             this.uniformHandLightColor.set(this.handColor);
-            this.uniformCameraY.setFloat((float) cameraPos.y);
+
+            if (this.uniformCameraY != null) {
+                this.uniformCameraY.setFloat((float) cameraPos.y);
+            }
+        }
+
+        if (this.uniformMakeupOmniColor != null && MinecraftClient.getInstance().world != null) {
+            MakeupProfile.Frame frame = MakeupProfile.frame();
+            this.makeupFrame = frame;
+
+            this.uniformMakeupOmniColor.set(frame.omniColor());
+            this.uniformMakeupOmniMin.set(frame.omniMin());
+            this.uniformMakeupDirectColor.set(frame.directColor());
+            if (this.uniformMakeupCandleColor != null) {
+                this.uniformMakeupCandleColor.set(frame.candleColor());
+            }
+            this.uniformMakeupZenith.set(frame.zenith());
+            this.uniformMakeupHorizon.set(frame.horizon());
+            this.uniformMakeupWaterColor.set(frame.waterColor());
+            this.uniformMakeupFogColor.set(frame.fogColor());
+            this.uniformMakeupCameraPos.set((float) cameraPos.x, (float) cameraPos.y, (float) cameraPos.z);
+
+            this.uniformMakeupSun.setFloat(frame.sunLight() ? 1.0F : 0.0F);
+            this.uniformMakeupWater.setFloat(frame.water() ? 1.0F : 0.0F);
+            this.uniformMakeupWaterAbsorption.setFloat(frame.waterAbsorption());
+            this.uniformMakeupWaterReflection.setFloat(frame.waterSkyReflection() ? 1.0F : 0.0F);
+            this.uniformMakeupWaterWaves.setFloat(frame.waterWaves() ? 1.0F : 0.0F);
+            this.uniformMakeupWaveStrength.setFloat(frame.waveStrength());
+            this.uniformMakeupFog.setFloat(frame.fog() && MakeupProfile.isOverworld() ? 1.0F : 0.0F);
+            this.uniformMakeupFogDensity.setFloat(frame.fogDensity());
+            this.uniformMakeupEyeSky.setFloat(frame.eyeSky());
+            this.uniformMakeupRain.setFloat(frame.rain());
+            this.uniformMakeupFar.setFloat(frame.fogFar());
+
+            MinecraftClient client = MinecraftClient.getInstance();
+            this.uniformMakeupTime.setFloat((client.world.getTime() + client.getTickDelta()) * 0.05F);
         }
 
         if (this.uniformShadowStrength != null) {
@@ -213,10 +349,14 @@ public class ChunkShaderInterface {
 
     @Deprecated(forRemoval = true) // should be handled properly in GFX instead.
     private void bindTexture(ChunkShaderTextureSlot slot, int textureId) {
+        var uniform = this.uniformTextures.get(slot);
+
+        if (uniform == null) {
+            return;
+        }
+
         GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + slot.ordinal());
         GlStateManager._bindTexture(textureId);
-
-        var uniform = this.uniformTextures.get(slot);
         uniform.setInt(slot.ordinal());
     }
 
@@ -226,6 +366,17 @@ public class ChunkShaderInterface {
 
     public void setModelViewMatrix(Matrix4fc matrix) {
         this.uniformModelViewMatrix.set(matrix);
+
+        if (this.uniformMakeupSunDirView != null && this.makeupFrame != null) {
+            Matrix4f view = new Matrix4f(matrix);
+            MakeupProfile.Frame frame = this.makeupFrame;
+
+            Vector3f sun = view.transformDirection(new Vector3f(frame.sunX(), frame.sunY(), frame.sunZ()));
+            Vector3f up = view.transformDirection(new Vector3f(0.0F, 1.0F, 0.0F));
+
+            this.uniformMakeupSunDirView.set(sun.x, sun.y, sun.z);
+            this.uniformMakeupUpView.set(up.x, up.y, up.z);
+        }
     }
 
     public void setRegionOffset(float x, float y, float z) {

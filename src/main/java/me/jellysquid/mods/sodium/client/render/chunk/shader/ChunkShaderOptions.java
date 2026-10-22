@@ -5,13 +5,21 @@ import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
-                                 boolean surfaceReflection) {
+                                 boolean surfaceReflection, boolean makeupProfile) {
     public ChunkShaderOptions withSurfaceReflection(boolean value) {
         if (this.surfaceReflection == value) {
             return this;
         }
 
-        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value);
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile);
+    }
+
+    public ChunkShaderOptions withMakeupProfile(boolean value) {
+        if (this.makeupProfile == value) {
+            return this;
+        }
+
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value);
     }
 
     public ShaderConstants constants() {
@@ -42,6 +50,12 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         // so the default path pays nothing for it.
         if (this.surfaceReflection) {
             constants.add("SURFACE_REFLECTION");
+        }
+
+        // The MakeUp profile is another optional path. It reuses the same derivative normal and
+        // the same chunk attributes; only the light and water math changes.
+        if (this.makeupProfile) {
+            constants.add("MAKEUP_NO_EFFECTS");
         }
 
         return constants.build();

@@ -6,6 +6,7 @@ import me.jellysquid.mods.sodium.client.gl.attribute.GlVertexFormat;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
 import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
 import me.jellysquid.mods.sodium.client.gl.shader.*;
+import me.jellysquid.mods.sodium.client.render.MakeupProfile;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.shader.*;
@@ -71,27 +72,47 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     }
 
     /**
-     * Compiles one program, retrying once without the optional surface reflection. Reflection is
-     * a visual extra; a driver that cannot compile its derivative-based normal should lose that
-     * effect, not the whole chunk shader (and certainly not colored lighting with it).
+     * Compiles one program, retrying once without each optional visual path. A driver that cannot
+     * compile the derivative-based reflection or the profile must lose that effect, not the whole
+     * chunk shader (and certainly not colored lighting with it).
      */
     private GlProgram<ChunkShaderInterface> createShaderSafely(String path, ChunkShaderOptions options,
                                                                boolean colored, boolean analytic, int maxLights) {
+        ChunkShaderOptions attempt = options;
+
         try {
-            return createShader(path, options, colored, analytic, maxLights);
-        } catch (RuntimeException e) {
-            if (!options.surfaceReflection()) {
-                throw e;
+            return createShader(path, attempt, colored, analytic, maxLights);
+        } catch (RuntimeException first) {
+            RuntimeException failure = first;
+
+            // Drop the optional paths cumulatively: first the smaller reflection, then the
+            // profile. Retrying the original options after the reflection failure would put the
+            // reflection back and make the fallback fail again on the same driver.
+            if (attempt.surfaceReflection()) {
+                SodiumClientMod.logger().error("Surface reflection shader failed to compile; retrying without reflection", failure);
+                attempt = attempt.withSurfaceReflection(false);
+
+                try {
+                    return createShader(path, attempt, colored, analytic, maxLights);
+                } catch (RuntimeException nested) {
+                    nested.addSuppressed(failure);
+                    failure = nested;
+                }
             }
 
-            SodiumClientMod.logger().error("Surface reflection shader failed to compile; retrying without reflection", e);
+            if (attempt.makeupProfile()) {
+                SodiumClientMod.logger().error("MakeUp profile shader failed to compile; retrying without the profile", failure);
+                attempt = attempt.withMakeupProfile(false);
 
-            try {
-                return createShader(path, options.withSurfaceReflection(false), colored, analytic, maxLights);
-            } catch (RuntimeException nested) {
-                nested.addSuppressed(e);
-                throw nested;
+                try {
+                    return createShader(path, attempt, colored, analytic, maxLights);
+                } catch (RuntimeException nested) {
+                    nested.addSuppressed(failure);
+                    throw nested;
+                }
             }
+
+            throw failure;
         }
     }
 
@@ -101,7 +122,7 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         SodiumClientMod.logger().error("Colored lighting shader failed to compile; falling back", e);
         ColoredLighting.markShaderFailed();
 
-        return createShader(path, options.withSurfaceReflection(false), false, false, 0);
+        return createShaderSafely(path, options.withSurfaceReflection(false), false, false, 0);
     }
 
     private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options, boolean colored, boolean analytic, int maxLights) {
@@ -143,7 +164,9 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                 && !ColoredLighting.isIrisLoaded()
                 && !pass.isReverseOrder()
                 && !pass.supportsFragmentDiscard();
-        ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType, surfaceReflection);
+        boolean makeupProfile = MakeupProfile.isEnabled();
+        ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType,
+                surfaceReflection, makeupProfile);
 
         this.activeProgram = this.compileProgram(options);
         this.activeProgram.bind();

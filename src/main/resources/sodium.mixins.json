@@ -65,6 +65,7 @@
     "features.render.world.clouds.WorldRendererMixin",
     "features.render.world.sky.BackgroundRendererMixin",
     "features.render.world.sky.ClientWorldMixin",
+    "features.render.world.sky.MakeupSkyMixin",
     "features.render.world.sky.WorldRendererMixin",
     "features.render.visual.BlockEntityLimitsMixin",
     "features.render.visual.SkyRendererMixin",
