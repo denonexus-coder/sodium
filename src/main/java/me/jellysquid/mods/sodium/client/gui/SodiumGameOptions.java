@@ -105,6 +105,36 @@ public class SodiumGameOptions {
 
         /** Adds the light of the held block to the chunk shader; costs a few ALU per vertex. */
         public boolean handLight = true;
+
+        /**
+         * Tints and darkens the ambient part of the light where the surface is occluded from the
+         * sky. It is applied in the chunk vertex shader, so it adds no pass and no texture. The
+         * defaults are conservative: low light gets a cool tint, full sky light is unchanged.
+         */
+        public boolean coloredShadows = true;
+
+        /** 0..100. Scales the amount by which occluded ambient light is darkened. */
+        public int shadowStrength = 50;
+
+        /** 0..100. How much of the shadow comes from depth (low Y) rather than from occlusion. */
+        public int shadowDepth = 60;
+
+        /** 0..100. How much the shadow hue follows the local colored light. */
+        public int shadowTint = 55;
+
+        /**
+         * Adds a cheap Fresnel/sky sheen to opaque chunk surfaces. It is a fragment effect derived
+         * from the view-space position, so it needs no normals in the chunk format and no shadow
+         * map. Off by default: grass and other matte surfaces should look matte unless the player
+         * asks for the effect.
+         */
+        public boolean surfaceReflection = false;
+
+        /** 0..100. How strongly the sheen is mixed over the block texture. */
+        public int reflectionStrength = 35;
+
+        /** 0..100. Fresnel exponent; higher values keep the sheen at grazing angles only. */
+        public int reflectionSoftness = 50;
     }
 
     public enum LightEngine {

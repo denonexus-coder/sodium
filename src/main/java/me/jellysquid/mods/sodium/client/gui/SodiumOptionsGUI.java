@@ -232,7 +232,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.donateButton = new FlatButtonWidget(new Dim2i(this.width - 128, 4, 100, 20), Text.literal("Oferecer um café"), this::openDonationPage);
         this.hideDonateButton = new FlatButtonWidget(new Dim2i(this.width - 24, 4, 18, 20), Text.literal("x"), this::hideDonationButton);
 
-        if (SodiumClientMod.options().notifications.hasClearedDonationButton) {
+        if (this.width < 360 || SodiumClientMod.options().notifications.hasClearedDonationButton) {
             this.setDonationButtonVisibility(false);
         }
 
@@ -251,8 +251,12 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private void computeLayout() {
         boolean compact = this.width < 560;
 
-        // "Experimental" is the longest tab label; the rail has to fit it at both sizes.
-        this.railWidth = compact ? 88 : 92;
+        // On a short screen the one-column rail cannot show all pages: six built-in pages plus
+        // Flywheel and Vanillin put the last button under the footer. A two-column rail keeps
+        // every page reachable without a second scroll area. The wider rail is only used when
+        // there is still room for the option list beside it.
+        boolean shortScreen = this.height < 240 && this.width >= 320;
+        this.railWidth = shortScreen ? 150 : (compact ? 88 : 92);
         this.detailVisible = this.width >= 600;
 
         this.contentX = this.railWidth + 8;
@@ -292,19 +296,41 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     }
 
     private void rebuildGUIPages() {
-        int x = 6;
-        int y = 34;
-
-        for (OptionPage page : this.pages) {
-            FlatButtonWidget button = new FlatButtonWidget(new Dim2i(x, y, this.railWidth - 12, 20), page.getName(), () -> this.setPage(page));
+        for (int i = 0; i < this.pages.size(); i++) {
+            OptionPage page = this.pages.get(i);
+            FlatButtonWidget button = new FlatButtonWidget(
+                    new Dim2i(this.pageButtonX(i), this.pageButtonY(i), this.pageButtonWidth(), 20),
+                    page.getName(), () -> this.setPage(page));
             button.setStyle(RAIL_BUTTON_STYLE);
             button.setSelected(this.currentPage == page);
             button.setSelectedColor(this.accent());
 
-            y += 22;
-
             this.addDrawableChild(button);
         }
+    }
+
+    private boolean twoColumnRail() {
+        return this.railWidth > 120;
+    }
+
+    private int pageButtonWidth() {
+        return this.twoColumnRail() ? (this.railWidth - 16) / 2 : this.railWidth - 12;
+    }
+
+    private int pageButtonX(int index) {
+        if (!this.twoColumnRail()) {
+            return 6;
+        }
+
+        return 6 + (index % 2) * (this.pageButtonWidth() + 4);
+    }
+
+    private int pageButtonY(int index) {
+        if (!this.twoColumnRail()) {
+            return 34 + index * 22;
+        }
+
+        return 34 + (index / 2) * 22;
     }
 
     private void rebuildGUIOptions() {
@@ -436,9 +462,10 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         int selectedIndex = this.pages.indexOf(this.currentPage);
 
         if (selectedIndex >= 0) {
-            int y = 34 + selectedIndex * 22;
+            int x = this.pageButtonX(selectedIndex);
+            int y = this.pageButtonY(selectedIndex);
 
-            drawContext.fill(4, y + 2, 6, y + 18, accent);
+            drawContext.fill(x - 2, y + 2, x, y + 18, accent);
         }
 
         Text title = this.currentPage.getName();

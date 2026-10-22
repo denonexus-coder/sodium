@@ -1,7 +1,9 @@
 package me.jellysquid.mods.sodium.client.render.chunk.shader;
 
 import com.mojang.blaze3d.platform.GlStateManager;
+import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gl.device.GLRenderDevice;
+import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat2v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3Array;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3v;
@@ -47,6 +49,16 @@ public class ChunkShaderInterface {
     // Both engines share the hand light.
     private final GlUniformFloat4v uniformHandLight;
     private final GlUniformFloat3v uniformHandLightColor;
+    private final GlUniformFloat uniformCameraY;
+
+    // Colored shadows are part of the colored-light vertex path.
+    private final GlUniformFloat uniformShadowStrength;
+    private final GlUniformFloat uniformShadowDepth;
+    private final GlUniformFloat uniformShadowTint;
+
+    // Surface reflection is an optional fragment path; the uniforms exist only when compiled in.
+    private final GlUniformFloat uniformReflectionStrength;
+    private final GlUniformFloat uniformReflectionSoftness;
 
     private final float[] handLight = new float[4];
     private final float[] handColor = new float[3];
@@ -69,9 +81,25 @@ public class ChunkShaderInterface {
         if (coloredLighting) {
             this.uniformHandLight = context.bindUniform("u_HandLight", GlUniformFloat4v::new);
             this.uniformHandLightColor = context.bindUniform("u_HandLightColor", GlUniformFloat3v::new);
+            this.uniformCameraY = context.bindUniform("u_CameraY", GlUniformFloat::new);
+            this.uniformShadowStrength = context.bindUniform("u_ShadowStrength", GlUniformFloat::new);
+            this.uniformShadowDepth = context.bindUniform("u_ShadowDepth", GlUniformFloat::new);
+            this.uniformShadowTint = context.bindUniform("u_ShadowTint", GlUniformFloat::new);
         } else {
             this.uniformHandLight = null;
             this.uniformHandLightColor = null;
+            this.uniformCameraY = null;
+            this.uniformShadowStrength = null;
+            this.uniformShadowDepth = null;
+            this.uniformShadowTint = null;
+        }
+
+        if (options.surfaceReflection()) {
+            this.uniformReflectionStrength = context.bindUniform("u_ReflectionStrength", GlUniformFloat::new);
+            this.uniformReflectionSoftness = context.bindUniform("u_ReflectionSoftness", GlUniformFloat::new);
+        } else {
+            this.uniformReflectionStrength = null;
+            this.uniformReflectionSoftness = null;
         }
 
         if (coloredLighting && !analyticLighting) {
@@ -138,6 +166,24 @@ public class ChunkShaderInterface {
             ColoredLighting.writeHandLight(cameraPos, this.handLight, this.handColor);
             this.uniformHandLight.set(this.handLight);
             this.uniformHandLightColor.set(this.handColor);
+            this.uniformCameraY.setFloat((float) cameraPos.y);
+        }
+
+        if (this.uniformShadowStrength != null) {
+            var experimental = SodiumClientMod.options().experimental;
+            boolean enabled = experimental.coloredShadows && !ColoredLighting.isIrisLoaded();
+
+            this.uniformShadowStrength.setFloat(enabled ? percent(experimental.shadowStrength) : 0.0F);
+            this.uniformShadowDepth.setFloat(enabled ? percent(experimental.shadowDepth) : 0.0F);
+            this.uniformShadowTint.setFloat(enabled ? percent(experimental.shadowTint) : 0.0F);
+        }
+
+        if (this.uniformReflectionStrength != null) {
+            var experimental = SodiumClientMod.options().experimental;
+            boolean enabled = experimental.surfaceReflection && !ColoredLighting.isIrisLoaded();
+
+            this.uniformReflectionStrength.setFloat(enabled ? percent(experimental.reflectionStrength) : 0.0F);
+            this.uniformReflectionSoftness.setFloat(2.0F + 14.0F * percent(experimental.reflectionSoftness));
         }
 
         if (this.uniformLightPos != null) {
@@ -184,5 +230,10 @@ public class ChunkShaderInterface {
 
     public void setRegionOffset(float x, float y, float z) {
         this.uniformRegionOffset.set(x, y, z);
+    }
+
+    /** Config values are edited as 0..100 integers; the shader wants a 0..1 uniform. */
+    private static float percent(int value) {
+        return Math.max(0, Math.min(100, value)) * 0.01F;
     }
 }

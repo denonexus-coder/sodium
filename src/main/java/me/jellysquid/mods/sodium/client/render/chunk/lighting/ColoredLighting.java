@@ -302,11 +302,21 @@ public final class ColoredLighting {
     }
 
     /**
+     * Whether the Iris mod is present at all. The new shadow and reflection controls are Sodium
+     * features that depend on Sodium's chunk shader; they are disabled when Iris is installed,
+     * even if no shader pack is selected, because Iris owns the render path from that point on.
+     * Existing colored lighting keeps the narrower pack-in-use check.
+     */
+    public static boolean isIrisLoaded() {
+        return FabricLoader.getInstance().isModLoaded("iris");
+    }
+
+    /**
      * Iris replaces Sodium's chunk shader while a pack is on. The reflection is done once per
      * second at most, and only when Iris is actually installed.
      */
     public static boolean isIrisShaderPackInUse() {
-        if (!FabricLoader.getInstance().isModLoaded("iris")) {
+        if (!isIrisLoaded()) {
             return false;
         }
 

@@ -17,6 +17,12 @@ out float v_MaterialAlphaCutoff;
 out float v_FragDistance;
 #endif
 
+#ifdef SURFACE_REFLECTION
+out vec3 v_ViewPos;
+out vec3 v_SkyColor;
+out float v_SkyLight;
+#endif
+
 uniform int u_FogShape;
 uniform vec3 u_RegionOffset;
 uniform vec2 u_TexCoordShrink;
@@ -26,6 +32,16 @@ uniform sampler2D u_LightTex; // The light map texture sampler
 #ifdef COLORED_LIGHTING
 uniform vec4 u_HandLight;          // xyz: camera-relative hand position, w: intensity
 uniform vec3 u_HandLightColor;
+
+// Positions in this shader are camera-relative. The shadow depth needs absolute world height,
+// so the camera's Y is passed separately instead of being folded into every vertex.
+uniform float u_CameraY;
+
+// Cheap colored shadows. These only touch the ambient part of the light, so block lights keep
+// lighting the surface while the sky contribution is darkened and tinted where it is occluded.
+uniform float u_ShadowStrength;
+uniform float u_ShadowDepth;
+uniform float u_ShadowTint;
 
 #ifdef ANALYTIC_LIGHTING
 // A short list of nearby lights: position is camera-relative, w is the peak intensity, and the
@@ -101,7 +117,38 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
         block += u_HandLightColor * (atten * atten * u_HandLight.w);
     }
 
-    return clamp(sky * 0.90 + block + vec3(0.06), 0.0, 1.30);
+    vec3 ambient = sky * 0.90;
+
+    if (u_ShadowStrength > 0.0) {
+        // Occlusion is inferred from the vanilla lightmap: a surface with little sky light and
+        // little block light is in a shadow. No shadow map is involved.
+        float skyLight = clamp(lightCoord.y, 0.0, 1.0);
+        float blockLight = clamp(lightCoord.x, 0.0, 1.0);
+        float occlusion = (1.0 - smoothstep(0.0, 0.90, skyLight))
+                * (1.0 - 0.60 * smoothstep(0.0, 0.85, blockLight));
+
+        // Lower surfaces are deeper. The config controls how much of the effect comes from that
+        // depth rather than from the lightmap itself.
+        float worldY = worldPos.y + u_CameraY;
+        float depth = 1.0 - smoothstep(20.0, 110.0, worldY);
+        float depthWeight = mix(0.35, 1.0, depth * u_ShadowDepth);
+
+        // Daylight shadows lean blue; deep shadows lean violet. The colored-light hue is mixed in
+        // so a torch-lit shadow keeps the color of the torch instead of turning grey.
+        vec3 shade = mix(vec3(0.72, 0.82, 1.00), vec3(0.48, 0.38, 0.68), depth);
+        vec3 hue = colored / max(max(colored.r, colored.g), max(colored.b, 1.0e-4));
+        shade = mix(shade, hue, u_ShadowTint * colorAmount);
+
+        float amount = clamp(u_ShadowStrength * occlusion * depthWeight, 0.0, 1.0);
+        ambient *= mix(vec3(1.0), shade, amount);
+        ambient *= 1.0 - amount * 0.22;
+
+        // The block term is only touched slightly: it stays the main light in a cave, but the
+        // deepest part of the shadow still carries the local light's color.
+        block = mix(block, block * shade, amount * 0.30);
+    }
+
+    return clamp(ambient + block + vec3(0.06), 0.0, 1.30);
 }
 #endif
 
@@ -128,6 +175,15 @@ void main() {
 
     // Transform the vertex position into model-view-projection space
     gl_Position = u_ProjectionMatrix * u_ModelViewMatrix * vec4(position, 1.0);
+
+#ifdef SURFACE_REFLECTION
+    // The fragment shader derives a flat face normal from these view-space positions. This avoids
+    // adding a normal attribute to the chunk vertex format, which would cost bandwidth on every
+    // chunk. The sky color is sampled once per vertex and only used when the surface sees sky.
+    v_ViewPos = (u_ModelViewMatrix * vec4(position, 1.0)).xyz;
+    v_SkyColor = texture(u_LightTex, vec2(0.0, 1.0)).rgb;
+    v_SkyLight = _vert_tex_light_coord.y;
+#endif
 
     // Add the light color to the vertex color, and pass the texture coordinates to the fragment shader
 #ifdef COLORED_LIGHTING

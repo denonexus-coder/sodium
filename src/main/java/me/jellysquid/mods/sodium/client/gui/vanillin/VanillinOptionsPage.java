@@ -207,7 +207,9 @@ public final class VanillinOptionsPage {
 		List<OptionGroup> groups = new ArrayList<>();
 
 		groups.add(OptionGroup.createBuilder()
+				.setName(Text.literal("Estado"))
 				.add(introRow())
+				.add(bulkRow())
 				.build());
 
 		List<Option<?>> blockEntities = new ArrayList<>();
@@ -247,11 +249,12 @@ public final class VanillinOptionsPage {
 
 	/**
 	 * Shown, never switched. Vanillin has no master switch -- each visual stands on its own -- so
-	 * this row reports what the page is for instead of pretending to gate rows behind nothing.
+	 * this row reports how many visuals were found instead of pretending to gate rows behind
+	 * nothing. The bulk row below is the only page-wide control.
 	 */
 	private static Option<Boolean> introRow() {
 		return OptionImpl.createBuilder(boolean.class, VanillinOptionsStorage.INSTANCE)
-				.setName(Text.literal("Visuais do Vanillin"))
+				.setName(Text.literal(VanillinCompat.entries().size() + " visuais detetados"))
 				.setTooltip(Text.literal(
 						"Liga e desliga cada visual registado pelo Vanillin. Cada linha é um tipo de objeto e "
 								+ "Aplicar instala a escolha no registo vivo e grava-a no vanillin.json.\n\n"
@@ -261,8 +264,8 @@ public final class VanillinOptionsPage {
 								+ "Vanillin não existisse.\n"
 								+ "Forçar: instala um visualizador mesmo que outro mod tenha pedido para não o "
 								+ "fazer.\n\n"
-								+ "O que afeta: quem desenha o objeto. Geometria, animação e luz passam a ser do "
-								+ "Flywheel.\n\n"
+								+ "A linha «Todos os visuais» aplica um destes estados a todas as linhas de uma vez; "
+								+ "«Misto» aparece quando elas não estão de acordo.\n\n"
 								+ "O que o Aplicar faz: instala a escolha no registo de visualizadores e recarrega o "
 								+ "renderizador. O mundo reconstrói as secções de chunk, e é isso que recria os "
 								+ "visuais com a escolha nova — sem sair do jogo. Custa alguns segundos de chunks a "
@@ -271,6 +274,41 @@ public final class VanillinOptionsPage {
 				.setEnabled(false)
 				.setBinding((data, value) -> {
 				}, data -> !VanillinCompat.entries().isEmpty())
+				.build();
+	}
+
+	/**
+	 * One control for every row. It writes only when Aplicar runs, like every other option, and
+	 * the per-visual rows come after it in the group list: a bulk change establishes the baseline
+	 * and any row the player also edited still wins.
+	 */
+	private static Option<VanillinBulkState> bulkRow() {
+		return OptionImpl.createBuilder(VanillinBulkState.class, VanillinOptionsStorage.INSTANCE)
+				.setName(Text.literal("Todos os visuais"))
+				.setTooltip(Text.literal(
+						"Aplica um estado a todas as linhas desta página de uma vez.\n\n"
+								+ "Padrão: todos voltam à decisão do Vanillin — estáveis ligados, experimentais "
+								+ "desligados fora de desenvolvimento.\n"
+								+ "Vanilla: remove todos os visualizadores; cada objeto volta ao renderizador vanilla.\n"
+								+ "Forçar instância: instala todos, incluindo os experimentais.\n"
+								+ "Misto: não é uma escolha; aparece quando as linhas já não estão todas no mesmo "
+								+ "estado. Escolher Misto não altera nada.\n\n"
+								+ "As linhas individuais continuam a mandar: se também alterares uma delas, a escolha "
+								+ "dessa linha prevalece sobre a escolha global.\n\n"
+								+ "Aplicar grava o resultado no vanillin.json e recarrega o renderizador para os "
+								+ "objetos que já estão no ecrã passarem a usar a escolha nova."))
+				.setControl(option -> new CyclingControl<>(option, VanillinBulkState.class, new Text[]{
+						Text.literal("Padrão"),
+						Text.literal("Vanilla"),
+						Text.literal("Forçar"),
+						Text.literal("Misto")
+				}))
+				.setImpact(OptionImpact.MEDIUM)
+				.setBinding((data, value) -> {
+					if (value != null) {
+						VanillinCompat.setAll(value.toState());
+					}
+				}, data -> VanillinCompat.commonState())
 				.build();
 	}
 

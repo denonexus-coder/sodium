@@ -6,6 +6,7 @@ import java.util.function.BooleanSupplier;
 
 import com.google.common.collect.ImmutableList;
 
+import me.jellysquid.mods.sodium.client.gui.options.GatedOption;
 import me.jellysquid.mods.sodium.client.gui.options.Option;
 import me.jellysquid.mods.sodium.client.gui.options.OptionFlag;
 import me.jellysquid.mods.sodium.client.gui.options.OptionGroup;

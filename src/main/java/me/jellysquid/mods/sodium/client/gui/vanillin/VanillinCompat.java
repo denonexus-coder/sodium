@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import net.fabricmc.loader.api.FabricLoader;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -173,7 +174,14 @@ public final class VanillinCompat {
 				present = !entries.isEmpty();
 			}
 		} catch (Throwable t) {
-			LOGGER.debug("Vanillin is not installed, so its options page will not be shown", t);
+			if (FabricLoader.getInstance().isModLoaded("vanillin")) {
+				// A changed Vanillin build is the one case where the page can disappear while the
+				// mod is installed. Log it at warning level, with the reflected target, so a log is
+				// enough to diagnose it instead of guessing whether the page was built at all.
+				LOGGER.warn("Vanillin is installed but Sodium could not read its configurator; the page will not be shown", t);
+			} else {
+				LOGGER.debug("Vanillin is not installed, so its options page will not be shown", t);
+			}
 			present = false;
 		}
 
@@ -193,7 +201,9 @@ public final class VanillinCompat {
 		PRESENT = present;
 
 		if (present) {
-			LOGGER.debug("Vanillin detected, {} visuals will appear on their own Sodium page", ENTRIES.size());
+			LOGGER.info("Vanillin detected: {} visuals will appear on their own Sodium page", ENTRIES.size());
+		} else if (FabricLoader.getInstance().isModLoaded("vanillin")) {
+			LOGGER.warn("Vanillin is installed but no visuals could be enumerated; the Sodium page will not be shown");
 		}
 	}
 
@@ -234,6 +244,45 @@ public final class VanillinCompat {
 	/** Every visual Vanillin can configure, block entities first, in registration order. */
 	public static List<Entry> entries() {
 		return ENTRIES;
+	}
+
+	/**
+	 * The state shared by every row, or {@link VanillinBulkState#MIXED} when the rows disagree.
+	 * The bulk control uses this to show the real state instead of silently adopting one row's
+	 * value as if it were global.
+	 */
+	public static VanillinBulkState commonState() {
+		if (ENTRIES.isEmpty()) {
+			return VanillinBulkState.MIXED;
+		}
+
+		VanillinState first = get(ENTRIES.get(0));
+
+		for (int i = 1; i < ENTRIES.size(); i++) {
+			if (get(ENTRIES.get(i)) != first) {
+				return VanillinBulkState.MIXED;
+			}
+		}
+
+		return switch (first) {
+			case DEFAULT -> VanillinBulkState.DEFAULT;
+			case DISABLE -> VanillinBulkState.DISABLE;
+			case FORCE_ENABLE -> VanillinBulkState.FORCE_ENABLE;
+		};
+	}
+
+	/**
+	 * Writes one state to every visual. This is the binding behind the bulk row; the caller still
+	 * owns the apply cycle, so nothing is written to disk or installed in the registry here.
+	 */
+	public static void setAll(VanillinState state) {
+		if (state == null) {
+			return;
+		}
+
+		for (Entry entry : ENTRIES) {
+			set(entry, state);
+		}
 	}
 
 	public static Collection<Entry> blockEntityEntries() {

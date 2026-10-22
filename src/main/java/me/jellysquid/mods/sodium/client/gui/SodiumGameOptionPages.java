@@ -24,6 +24,7 @@ import org.lwjgl.opengl.GLCapabilities;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 /**
  * Sodium's own pages.
@@ -679,36 +680,42 @@ public class SodiumGameOptionPages {
      */
     public static OptionPage experimental() {
         List<OptionGroup> groups = new ArrayList<>();
-        boolean iris = ColoredLighting.isIrisShaderPackInUse();
-        String irisNote = iris ? "\n\nO Iris está a usar um shaderpack: as opções ficam desligadas até o desativares." : "";
+        boolean irisPack = ColoredLighting.isIrisShaderPackInUse();
+        boolean irisInstalled = ColoredLighting.isIrisLoaded();
+        String irisNote = irisPack ? "\n\nO Iris está a usar um shaderpack: as opções de iluminação ficam desligadas até o desativares." : "";
+        String newIrisNote = irisInstalled
+                ? "\n\nO Iris está instalado: as sombras e o reflexo do Sodium ficam desligados, porque o Iris controla o renderizador."
+                : "";
+
+        Option<SodiumGameOptions.LightingPath> lighting = OptionImpl.createBuilder(SodiumGameOptions.LightingPath.class, sodiumOpts)
+                .setName(Text.literal("Sistema"))
+                .setTooltip(Text.literal("Desligado desenha com o shader normal do Sodium. GLSL entrega ao MobileGlues um "
+                        + "shader GLSL 330, que ele traduz para ESSL antes de o passar ao driver. ESSL entrega "
+                        + "#version 320 es, que o MobileGlues reconhece como já traduzido e manda tal e qual ao "
+                        + "driver, sem tradução. Os dois caminhos são opcionais e exclusivos: o controlo roda por "
+                        + "Desligado, GLSL e ESSL.\n\n"
+                        + "O que afeta: troca a rampa única do lightmap pela cor de cada fonte (tocha, alma, "
+                        + "lava, portais, ametista, sculk, frogluz, velas e outras). O motor escolhido "
+                        + "abaixo decide se essa cor vem de um atlas 2D ou de uma lista de uniformes; "
+                        + "nenhum chunk é reconstruído. "
+                        + "Com um shaderpack do Iris ativo fica desligado, porque o Iris substitui o shader do "
+                        + "Sodium. Aplicar recarrega o renderizador." + irisNote))
+                .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.LightingPath.class, new Text[] {
+                        Text.literal("Desligado"), Text.literal("GLSL (MobileGlues)"), Text.literal("ESSL (direto)") }))
+                .setBinding((opts, value) -> {
+                    if (opts.experimental.lighting != value) {
+                        ColoredLighting.resetShaderFailure();
+                    }
+                    opts.experimental.lighting = value;
+                }, opts -> opts.experimental.lighting == null ? SodiumGameOptions.LightingPath.OFF : opts.experimental.lighting)
+                .setImpact(OptionImpact.MEDIUM)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .setEnabled(!irisPack)
+                .build();
 
         groups.add(OptionGroup.createBuilder()
                 .setName(Text.literal("Iluminação colorida"))
-                .add(OptionImpl.createBuilder(SodiumGameOptions.LightingPath.class, sodiumOpts)
-                        .setName(Text.literal("Sistema"))
-                        .setTooltip(Text.literal("Desligado desenha com o shader normal do Sodium. GLSL entrega ao MobileGlues um "
-                                + "shader GLSL 330, que ele traduz para ESSL antes de o passar ao driver. ESSL entrega "
-                                + "#version 320 es, que o MobileGlues reconhece como já traduzido e manda tal e qual ao "
-                                + "driver, sem tradução. Os dois caminhos são opcionais e exclusivos: o controlo roda por "
-                                + "Desligado, GLSL e ESSL.\n\n"
-                                + "O que afeta: troca a rampa única do lightmap pela cor de cada fonte (tocha, alma, "
-                                + "lava, portais, ametista, sculk, frogluz, velas e outras). O motor escolhido "
-                                + "abaixo decide se essa cor vem de um atlas 2D ou de uma lista de uniformes; "
-                                + "nenhum chunk é reconstruído. "
-                                + "Com um shaderpack do Iris ativo fica desligado, porque o Iris substitui o shader do "
-                                + "Sodium. Aplicar recarrega o renderizador." + irisNote))
-                        .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.LightingPath.class, new Text[] {
-                                Text.literal("Desligado"), Text.literal("GLSL (MobileGlues)"), Text.literal("ESSL (direto)") }))
-                        .setBinding((opts, value) -> {
-                            if (opts.experimental.lighting != value) {
-                                ColoredLighting.resetShaderFailure();
-                            }
-                            opts.experimental.lighting = value;
-                        }, opts -> opts.experimental.lighting == null ? SodiumGameOptions.LightingPath.OFF : opts.experimental.lighting)
-                        .setImpact(OptionImpact.MEDIUM)
-                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
-                        .setEnabled(!iris)
-                        .build())
+                .add(lighting)
                 .add(OptionImpl.createBuilder(SodiumGameOptions.LightEngine.class, sodiumOpts)
                         .setName(Text.literal("Motor de Luz"))
                         .setTooltip(Text.literal("Escolhe como a luz colorida é calculada.\n\n"
@@ -736,7 +743,7 @@ public class SodiumGameOptionPages {
                         }, opts -> opts.experimental.lightEngine == null ? SodiumGameOptions.LightEngine.GRID : opts.experimental.lightEngine)
                         .setImpact(OptionImpact.MEDIUM)
                         .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
-                        .setEnabled(!iris)
+                        .setEnabled(!irisPack)
                         .build())
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Luz na mão"))
@@ -750,8 +757,129 @@ public class SodiumGameOptionPages {
                         .setControl(TickBoxControl::new)
                         .setBinding((opts, value) -> opts.experimental.handLight = value, opts -> opts.experimental.handLight)
                         .setImpact(OptionImpact.LOW)
-                        .setEnabled(!iris)
+                        .setEnabled(!irisPack)
                         .build())
+                .build());
+
+        Option<Boolean> coloredShadows = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Sombras coloridas"))
+                .setTooltip(Text.literal("Escurece e tinge a parte ambiente da luz onde a superfície está abrigada do céu e "
+                        + "sem luz de bloco. A sombra aprofunda com a altura e com a falta de luz; a cor segue o "
+                        + "lightmap e a luz colorida local, por isso uma tocha, lava ou portal tinge a sombra em "
+                        + "vez de a deixar cinzenta.\n\n"
+                        + "Como é barato: é calculada por vértice no shader de chunks, a partir do lightmap que o "
+                        + "Sodium já tem. Não há shadow map, passagem extra, framebuffer nem textura nova. A luz de "
+                        + "bloco continua a iluminar a superfície; só a contribuição do céu é escurecida.\n\n"
+                        + "Só tem efeito com o Sistema de iluminação colorida ligado. Com um shaderpack do Iris "
+                        + "ativo, ou com o Iris instalado, fica desligado." + newIrisNote))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.coloredShadows = value,
+                        opts -> opts.experimental.coloredShadows)
+                .setImpact(OptionImpact.LOW)
+                .setEnabled(!irisInstalled)
+                .build();
+
+        BooleanSupplier shadowAvailable = () -> !irisInstalled
+                && lighting.getValue() != SodiumGameOptions.LightingPath.OFF;
+        BooleanSupplier shadowDetails = () -> shadowAvailable.getAsBoolean() && coloredShadows.getValue();
+
+        Option<Integer> shadowStrength = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Força das sombras"))
+                .setTooltip(Text.literal("Quanto a luz ambiente é escurecida nas zonas abrigadas. A 0% o efeito "
+                        + "desaparece na prática; a 100% é o valor máximo, pensado para ser usado com a "
+                        + "profundidade e a cor abaixo.\n\n"
+                        + "É lido por frame, por isso o slider vale logo depois de Aplicar e não obriga a "
+                        + "recarregar o renderizador."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.shadowStrength = value,
+                        opts -> opts.experimental.shadowStrength)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> shadowDepth = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Profundidade das sombras"))
+                .setTooltip(Text.literal("Quanto do efeito vem de estar fundo no mundo, além da oclusão do céu. A 0% "
+                        + "as sombras dependem só da luz que chega à face; a 100% as superfícies baixas "
+                        + "escurecem mais do que as altas, mesmo com a mesma luz.\n\n"
+                        + "A altura é lida do mundo, não da câmara. É útil para dar peso a cavernas, ravinas e "
+                        + "construções fundas sem tocar na luz de bloco."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.shadowDepth = value,
+                        opts -> opts.experimental.shadowDepth)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> shadowTint = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Cor das sombras"))
+                .setTooltip(Text.literal("Quanto a sombra segue a cor da luz colorida local. A 0% fica azul-acinzentada "
+                        + "como a luz do céu; a 100% assume o tom da tocha, lava, portal ou outra fonte que "
+                        + "esteja a iluminar a face.\n\n"
+                        + "Sem luz colorida a sombra fica no tom do lightmap. Isto não acende nada: só mistura "
+                        + "a cor da sombra, nunca aumenta a intensidade."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.shadowTint = value,
+                        opts -> opts.experimental.shadowTint)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Sombras"))
+                .add(coloredShadows)
+                .add(new GatedOption<>(shadowStrength, shadowDetails))
+                .add(new GatedOption<>(shadowDepth, shadowDetails))
+                .add(new GatedOption<>(shadowTint, shadowDetails))
+                .build());
+
+        Option<Boolean> surfaceReflection = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Reflexo de superfície"))
+                .setTooltip(Text.literal("Adiciona um brilho Fresnel do céu às superfícies opacas, incluindo a grama. "
+                        + "É o efeito de reflexo do Sodium; não é um espelho e não replica água, vidro ou "
+                        + "metal: é uma camada de céu nas faces vistas de raspão.\n\n"
+                        + "Desligado, a grama e as restantes superfícies ficam foscas. É o padrão, porque o "
+                        + "Sodium não tem reflexos especulares no renderizador normal e um brilho a mais era "
+                        + "exatamente o que fazia a grama parecer vidro.\n\n"
+                        + "Como é barato: o shader deriva uma normal de face da posição na tela, sem acrescentar "
+                        + "normais ao formato de vértice nem fazer uma passagem extra. O código só é compilado "
+                        + "quando ligas a opção. Precisa de recarregar o renderizador.\n\n"
+                        + "Com o Iris instalado fica desligado, porque o Iris controla o shader do mundo." + newIrisNote))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.surfaceReflection = value,
+                        opts -> opts.experimental.surfaceReflection)
+                .setImpact(OptionImpact.MEDIUM)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .setEnabled(!irisInstalled)
+                .build();
+
+        BooleanSupplier reflectionDetails = () -> !irisInstalled && surfaceReflection.getValue();
+
+        Option<Integer> reflectionStrength = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Intensidade do reflexo"))
+                .setTooltip(Text.literal("Quanto do céu é misturado na superfície quando o ângulo é rasante. A 0% "
+                        + "não se vê reflexo; a 100% é a mistura máxima. O valor é aplicado por frame, por isso "
+                        + "mudar o slider não recompila o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.reflectionStrength = value,
+                        opts -> opts.experimental.reflectionStrength)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> reflectionSoftness = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Suavidade do reflexo"))
+                .setTooltip(Text.literal("Controla o expoente Fresnel. A 0% o brilho espalha-se por mais ângulos e "
+                        + "a superfície parece mais polida; a 100% fica concentrado nas faces vistas de "
+                        + "raspão, como uma superfície mais fosca.\n\n"
+                        + "É um uniform lido por frame; não obriga a recarregar o renderizador."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.experimental.reflectionSoftness = value,
+                        opts -> opts.experimental.reflectionSoftness)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Reflexos"))
+                .add(surfaceReflection)
+                .add(new GatedOption<>(reflectionStrength, reflectionDetails))
+                .add(new GatedOption<>(reflectionSoftness, reflectionDetails))
                 .build());
 
         return new OptionPage(Text.literal("Experimental"), ImmutableList.copyOf(groups));

@@ -43,16 +43,11 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
 
     private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options) {
         boolean colored = ColoredLighting.isActive();
-
-        if (!colored) {
-            return createShader(path, options, false, false, 0);
-        }
-
-        boolean analytic = ColoredLighting.useAnalytic();
+        boolean analytic = colored && ColoredLighting.useAnalytic();
         int maxLights = analytic ? ColoredLighting.getMaxLights() : 0;
 
         try {
-            return createShader(path, options, true, analytic, maxLights);
+            return createShaderSafely(path, options, colored, analytic, maxLights);
         } catch (RuntimeException e) {
             if (analytic) {
                 // A driver that rejects the uniform list must not lose the whole feature: rebuild
@@ -61,13 +56,42 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                 ColoredLighting.markAnalyticFailed();
 
                 try {
-                    return createShader(path, options, true, false, 0);
+                    return createShaderSafely(path, options, true, false, 0);
                 } catch (RuntimeException nested) {
                     return fallbackShader(path, options, nested);
                 }
             }
 
-            return fallbackShader(path, options, e);
+            if (colored) {
+                return fallbackShader(path, options, e);
+            }
+
+            throw e;
+        }
+    }
+
+    /**
+     * Compiles one program, retrying once without the optional surface reflection. Reflection is
+     * a visual extra; a driver that cannot compile its derivative-based normal should lose that
+     * effect, not the whole chunk shader (and certainly not colored lighting with it).
+     */
+    private GlProgram<ChunkShaderInterface> createShaderSafely(String path, ChunkShaderOptions options,
+                                                               boolean colored, boolean analytic, int maxLights) {
+        try {
+            return createShader(path, options, colored, analytic, maxLights);
+        } catch (RuntimeException e) {
+            if (!options.surfaceReflection()) {
+                throw e;
+            }
+
+            SodiumClientMod.logger().error("Surface reflection shader failed to compile; retrying without reflection", e);
+
+            try {
+                return createShader(path, options.withSurfaceReflection(false), colored, analytic, maxLights);
+            } catch (RuntimeException nested) {
+                nested.addSuppressed(e);
+                throw nested;
+            }
         }
     }
 
@@ -77,7 +101,7 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         SodiumClientMod.logger().error("Colored lighting shader failed to compile; falling back", e);
         ColoredLighting.markShaderFailed();
 
-        return createShader(path, options, false, false, 0);
+        return createShader(path, options.withSurfaceReflection(false), false, false, 0);
     }
 
     private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options, boolean colored, boolean analytic, int maxLights) {
@@ -109,7 +133,12 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     protected void begin(TerrainRenderPass pass) {
         pass.startDrawing();
 
-        ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType);
+        // Iris owns the render path whenever it is installed. The shadow and reflection controls
+        // are Sodium shader features, so they are forced off here even if the config file still
+        // has them on from a run without Iris.
+        boolean surfaceReflection = SodiumClientMod.options().experimental.surfaceReflection
+                && !ColoredLighting.isIrisLoaded();
+        ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType, surfaceReflection);
 
         this.activeProgram = this.compileProgram(options);
         this.activeProgram.bind();
