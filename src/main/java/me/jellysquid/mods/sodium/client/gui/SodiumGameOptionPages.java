@@ -713,7 +713,7 @@ public class SodiumGameOptionPages {
                 .setEnabled(!irisPack)
                 .build();
 
-        groups.add(OptionGroup.createBuilder()
+        OptionGroup coloredLightingGroup = OptionGroup.createBuilder()
                 .setName(Text.literal("Iluminação colorida"))
                 .add(lighting)
                 .add(OptionImpl.createBuilder(SodiumGameOptions.LightEngine.class, sodiumOpts)
@@ -759,7 +759,14 @@ public class SodiumGameOptionPages {
                         .setImpact(OptionImpact.LOW)
                         .setEnabled(!irisPack)
                         .build())
-                .build());
+                .build();
+
+        // The whole colored-light engine is switched off in ColoredLighting, so its options
+        // are not added to the page. The group is still built, so turning the engine back on
+        // is a single change and the options come back with their saved values.
+        if (ColoredLighting.ENABLED) {
+            groups.add(coloredLightingGroup);
+        }
 
         Option<Boolean> coloredShadows = OptionImpl.createBuilder(boolean.class, sodiumOpts)
                 .setName(Text.literal("Sombras coloridas"))
@@ -822,13 +829,19 @@ public class SodiumGameOptionPages {
                 .setImpact(OptionImpact.LOW)
                 .build();
 
-        groups.add(OptionGroup.createBuilder()
+        OptionGroup shadowGroup = OptionGroup.createBuilder()
                 .setName(Text.literal("Sombras"))
                 .add(coloredShadows)
                 .add(new GatedOption<>(shadowStrength, shadowDetails))
                 .add(new GatedOption<>(shadowDepth, shadowDetails))
                 .add(new GatedOption<>(shadowTint, shadowDetails))
-                .build());
+                .build();
+
+        // The colored shadows are part of the colored-light shader path: their uniforms only
+        // exist when COLORED_LIGHTING is compiled in, so the group goes away with the engine.
+        if (ColoredLighting.ENABLED) {
+            groups.add(shadowGroup);
+        }
 
         Option<Boolean> surfaceReflection = OptionImpl.createBuilder(boolean.class, sodiumOpts)
                 .setName(Text.literal("Reflexo de superfície"))

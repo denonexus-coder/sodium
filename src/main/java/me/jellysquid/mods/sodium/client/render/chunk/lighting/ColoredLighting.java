@@ -56,6 +56,19 @@ public final class ColoredLighting {
     public static final int SIZE_Y = 16;
     public static final int SIZE_Z = 32;
 
+    /**
+     * Master switch for the whole colored-light engine.
+     *
+     * <p>When this is false the engine never runs: the chunk shader is built without the
+     * {@code COLORED_LIGHTING} define, the grid and the analytic light list are never
+     * scanned, and the option group is hidden from the Experimental page. The code stays
+     * in the tree, so turning the feature back on is a one-word change.
+     *
+     * <p>It is a constant instead of an option so that a stale config file cannot switch the
+     * engine back on behind the user's back.
+     */
+    public static final boolean ENABLED = false;
+
     private static final int CELLS = SIZE_X * SIZE_Y * SIZE_Z;
 
     /** The hand and the placed lights share this radius; the shader hard-codes the same value. */
@@ -249,6 +262,10 @@ public final class ColoredLighting {
     }
 
     public static LightingPath getPath() {
+        if (!ENABLED) {
+            return LightingPath.OFF;
+        }
+
         LightingPath path = SodiumClientMod.options().experimental.lighting;
 
         return path == null ? LightingPath.OFF : path;
