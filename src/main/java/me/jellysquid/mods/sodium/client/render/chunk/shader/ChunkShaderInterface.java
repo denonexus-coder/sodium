@@ -12,6 +12,7 @@ import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformInt;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
 import me.jellysquid.mods.sodium.client.render.MakeupProfile;
+import me.jellysquid.mods.sodium.client.render.shadows.MakeupShadowMap;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.AnalyticLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.impl.CompactChunkVertex;
@@ -83,6 +84,7 @@ public class ChunkShaderInterface {
     private final GlUniformFloat3v uniformMakeupUpView;
     private final GlUniformFloat3v uniformMakeupCameraPos;
     private final GlUniformFloat uniformMakeupSun;
+    private final GlUniformInt uniformMakeupAmbient;
     private final GlUniformFloat uniformMakeupWater;
     private final GlUniformFloat uniformMakeupWaterAbsorption;
     private final GlUniformFloat uniformMakeupWaterReflection;
@@ -94,6 +96,13 @@ public class ChunkShaderInterface {
     private final GlUniformFloat uniformMakeupRain;
     private final GlUniformFloat uniformMakeupFar;
     private final GlUniformFloat uniformMakeupTime;
+
+    // Low's optional depth map. These are only present in the normal terrain program; the
+    // shadow-caster variant compiles without PROFILE_SHADOWS.
+    private final GlUniformInt uniformProfileShadowMap;
+    private final GlUniformMatrix4f uniformProfileShadowMatrix;
+    private final GlUniformFloat uniformProfileShadowTexel;
+    private final GlUniformInt uniformProfileShadowActive;
 
     private MakeupProfile.Frame makeupFrame;
 
@@ -114,13 +123,9 @@ public class ChunkShaderInterface {
         this.uniformTextures = new EnumMap<>(ChunkShaderTextureSlot.class);
         this.uniformTextures.put(ChunkShaderTextureSlot.BLOCK, context.bindUniform("u_BlockTex", GlUniformInt::new));
 
-        // The profile reads raw lightmap coordinates instead of sampling the lightmap, and its
-        // colored-grid path uses u_ColorLightTex. u_LightTex is therefore dead in the profile
-        // unless the surface reflection samples it for its per-vertex sky colour. Drivers are
-        // free to eliminate dead samplers, so bind it only when it is really used.
-        if (!options.makeupProfile() || options.surfaceReflection()) {
-            this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
-        }
+        // Both the normal Sodium shader and the MakeUp profile sample the lightmap. The profile
+        // uses its sky column as the fallback when the custom ambient palette is disabled.
+        this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
 
         if (coloredLighting || options.makeupProfile()) {
             this.uniformHandLight = context.bindUniform("u_HandLight", GlUniformFloat4v::new);
@@ -184,6 +189,7 @@ public class ChunkShaderInterface {
             this.uniformMakeupCameraPos = context.bindUniform("u_MakeupCameraPos", GlUniformFloat3v::new);
 
             this.uniformMakeupSun = context.bindUniform("u_MakeupSun", GlUniformFloat::new);
+            this.uniformMakeupAmbient = context.bindUniform("u_MakeupAmbient", GlUniformInt::new);
             this.uniformMakeupWater = context.bindUniform("u_MakeupWater", GlUniformFloat::new);
             this.uniformMakeupWaterAbsorption = context.bindUniform("u_MakeupWaterAbsorption", GlUniformFloat::new);
             this.uniformMakeupWaterReflection = context.bindUniform("u_MakeupWaterReflection", GlUniformFloat::new);
@@ -208,6 +214,7 @@ public class ChunkShaderInterface {
             this.uniformMakeupUpView = null;
             this.uniformMakeupCameraPos = null;
             this.uniformMakeupSun = null;
+            this.uniformMakeupAmbient = null;
             this.uniformMakeupWater = null;
             this.uniformMakeupWaterAbsorption = null;
             this.uniformMakeupWaterReflection = null;
@@ -247,6 +254,18 @@ public class ChunkShaderInterface {
             this.uniformLightCount = null;
             this.lightPositions = null;
             this.lightColors = null;
+        }
+
+        if (options.makeupProfile() && options.profileShadows()) {
+            this.uniformProfileShadowMap = context.bindUniform("u_ProfileShadowMap", GlUniformInt::new);
+            this.uniformProfileShadowMatrix = context.bindUniform("u_ProfileShadowMatrix", GlUniformMatrix4f::new);
+            this.uniformProfileShadowTexel = context.bindUniform("u_ProfileShadowTexel", GlUniformFloat::new);
+            this.uniformProfileShadowActive = context.bindUniform("u_ProfileShadowActive", GlUniformInt::new);
+        } else {
+            this.uniformProfileShadowMap = null;
+            this.uniformProfileShadowMatrix = null;
+            this.uniformProfileShadowTexel = null;
+            this.uniformProfileShadowActive = null;
         }
 
         this.fogShader = options.fog().getFactory().apply(context);
@@ -314,6 +333,7 @@ public class ChunkShaderInterface {
             this.uniformMakeupCameraPos.set((float) cameraPos.x, (float) cameraPos.y, (float) cameraPos.z);
 
             this.uniformMakeupSun.setFloat(frame.sunLight() ? 1.0F : 0.0F);
+            this.uniformMakeupAmbient.setInt(frame.ambient() ? 1 : 0);
             this.uniformMakeupWater.setFloat(frame.water() ? 1.0F : 0.0F);
             this.uniformMakeupWaterAbsorption.setFloat(frame.waterAbsorption());
             this.uniformMakeupWaterReflection.setFloat(frame.waterSkyReflection() ? 1.0F : 0.0F);
@@ -327,6 +347,16 @@ public class ChunkShaderInterface {
 
             MinecraftClient client = MinecraftClient.getInstance();
             this.uniformMakeupTime.setFloat((client.world.getTime() + client.getTickDelta()) * 0.05F);
+        }
+
+        if (this.uniformProfileShadowMap != null) {
+            GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 3);
+            GlStateManager._bindTexture(MakeupShadowMap.getTextureId());
+            this.uniformProfileShadowMap.setInt(3);
+            this.uniformProfileShadowMatrix.set(MakeupShadowMap.getShadowMatrix());
+            this.uniformProfileShadowTexel.setFloat(MakeupShadowMap.getTexelSize());
+            this.uniformProfileShadowActive.setInt(MakeupShadowMap.isReady() ? 1 : 0);
+            GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
         }
 
         if (this.uniformShadowStrength != null) {

@@ -79,9 +79,9 @@ vec4 _makeup_fog(vec4 color, float dist, float visibleSky) {
         return color;
     }
 
-    // visibleSky is the raw lightmap coordinate, which stays at 1.0 in an open sky even at
-    // night. The eye brightness carries the time of day, so scale it by a cave factor instead
-    // of taking the maximum: an open night keeps the night reduction, a cave closes much less.
+    // visibleSky stays near 1.0 under an open sky even at night. The time-of-day brightness in
+    // eyeSky scales it down, and the cave factor keeps an enclosed space from fogging as much as
+    // the open sky. This is the cheap equivalent of MakeUp's max(eyeBrightness, visibleSky).
     float intensity = u_MakeupEyeSky * mix(0.35, 1.0, clamp(visibleSky, 0.0, 1.0));
     float f = pow(clamp(dist / max(u_MakeupFar, 1.0), 0.0, 1.0) * intensity,
                   mix(u_MakeupFogDensity, 1.0, u_MakeupRain));

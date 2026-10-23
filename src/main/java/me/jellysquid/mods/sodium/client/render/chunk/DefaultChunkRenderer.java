@@ -41,6 +41,25 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         this.sharedIndexBuffer = new SharedQuadIndexBuffer(device.createCommandList(), SharedQuadIndexBuffer.IndexType.INTEGER);
     }
 
+    /**
+     * Draws the same section geometry into the bind depth framebuffer. All faces are submitted
+     * because the shadow camera looks from the sun, not from the player; face culling against
+     * the player would drop the surfaces that should cast the shadow.
+     */
+    public void renderShadow(ChunkRenderMatrices matrices,
+                             CommandList commandList,
+                             ChunkRenderListIterable renderLists,
+                             TerrainRenderPass renderPass,
+                             CameraTransform camera) {
+        this.shadowPass = true;
+
+        try {
+            this.render(matrices, commandList, renderLists, renderPass, camera);
+        } finally {
+            this.shadowPass = false;
+        }
+    }
+
     @Override
     public void render(ChunkRenderMatrices matrices,
                        CommandList commandList,
@@ -52,7 +71,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
         super.begin(renderPass);
 
-        boolean useBlockFaceCulling = SodiumClientMod.options().performance.useBlockFaceCulling;
+        boolean useBlockFaceCulling = !this.shadowPass
+                && SodiumClientMod.options().performance.useBlockFaceCulling;
 
         // Widening the visible faces to a contiguous run (see expandToGeometryRun) puts
         // back-facing triangles back into the batch on the strength of GL discarding them, so

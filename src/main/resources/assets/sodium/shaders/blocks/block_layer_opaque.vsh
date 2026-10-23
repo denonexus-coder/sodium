@@ -25,7 +25,9 @@ out float v_SkyLight;
 
 #ifdef MAKEUP_NO_EFFECTS
 out vec3 v_MakeupBlock;
-out float v_MakeupSky;
+// x: raw lightmap sky column; y: MakeUp's visibleSky with its dead zone applied. Packing the
+// two values keeps the profile inside the GLES 3 varying budget with the reflection enabled.
+out vec2 v_MakeupLight;
 out vec3 v_MakeupViewPos;
 out vec3 v_MakeupWorldPos;
 out float v_MaterialWater;
@@ -257,7 +259,7 @@ void main() {
     // one from the view-space position with dFdx/dFdy.
     v_MakeupViewPos = (u_ModelViewMatrix * vec4(position, 1.0)).xyz;
     v_MakeupWorldPos = position + u_MakeupCameraPos;
-    v_MakeupSky = _makeup_visible_sky(_vert_tex_light_coord);
+    v_MakeupLight = vec2(_vert_tex_light_coord.y, _makeup_visible_sky(_vert_tex_light_coord));
 
     #ifdef COLORED_LIGHTING
         vec3 makeupTint;

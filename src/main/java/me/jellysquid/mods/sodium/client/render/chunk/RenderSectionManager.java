@@ -18,12 +18,14 @@ import me.jellysquid.mods.sodium.client.render.chunk.compile.executor.ChunkJobRe
 import me.jellysquid.mods.sodium.client.render.chunk.compile.tasks.ChunkBuilderMeshingTask;
 import me.jellysquid.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
 import me.jellysquid.mods.sodium.client.render.chunk.lists.ChunkRenderList;
+import me.jellysquid.mods.sodium.client.render.chunk.lists.ShadowRenderLists;
 import me.jellysquid.mods.sodium.client.render.chunk.lists.SortedRenderLists;
 import me.jellysquid.mods.sodium.client.render.chunk.lists.VisibleChunkCollector;
 import me.jellysquid.mods.sodium.client.render.chunk.occlusion.GraphDirection;
 import me.jellysquid.mods.sodium.client.render.chunk.occlusion.OcclusionCuller;
 import me.jellysquid.mods.sodium.client.render.chunk.region.RenderRegion;
 import me.jellysquid.mods.sodium.client.render.chunk.region.RenderRegionManager;
+import me.jellysquid.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkMeshFormats;
 import me.jellysquid.mods.sodium.client.render.util.RenderAsserts;
@@ -220,6 +222,55 @@ public class RenderSectionManager {
         CommandList commandList = device.createCommandList();
 
         this.chunkRenderer.render(matrices, commandList, this.renderLists, pass, new CameraTransform(x, y, z));
+
+        commandList.flush();
+    }
+
+    /**
+     * Builds a small, camera-independent list around the player and draws the opaque and cutout
+     * sections into the currently bound shadow depth framebuffer. The renderer's shadow-caster
+     * mode suppresses color writes and enables the profile's normal alpha cutout, so leaves and
+     * plants cast correctly without a second mesh format.
+     */
+    public void renderShadow(ChunkRenderMatrices matrices, CameraTransform camera) {
+        Map<RenderRegion, ChunkRenderList> lists = new HashMap<>();
+        double radiusSq = 96.0D * 96.0D;
+
+        for (RenderSection section : this.sectionByPosition.values()) {
+            if (section.isDisposed()) {
+                continue;
+            }
+
+            double dx = section.getOriginX() + 8.0D - camera.x;
+            double dy = section.getOriginY() + 8.0D - camera.y;
+            double dz = section.getOriginZ() + 8.0D - camera.z;
+
+            if (dx * dx + dy * dy + dz * dz > radiusSq) {
+                continue;
+            }
+
+            ChunkRenderList list = lists.get(section.getRegion());
+
+            if (list == null) {
+                list = new ChunkRenderList(section.getRegion());
+                list.reset(this.lastUpdatedFrame);
+                lists.put(section.getRegion(), list);
+            }
+
+            list.add(section);
+        }
+
+        if (lists.isEmpty()) {
+            return;
+        }
+
+        ShadowRenderLists shadowLists = new ShadowRenderLists(new ArrayList<>(lists.values()));
+        CommandList commandList = RenderDevice.INSTANCE.createCommandList();
+
+        if (this.chunkRenderer instanceof DefaultChunkRenderer renderer) {
+            renderer.renderShadow(matrices, commandList, shadowLists, DefaultTerrainRenderPasses.SOLID, camera);
+            renderer.renderShadow(matrices, commandList, shadowLists, DefaultTerrainRenderPasses.CUTOUT, camera);
+        }
 
         commandList.flush();
     }

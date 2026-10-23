@@ -12,6 +12,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.lists.SortedRenderLists;
 import me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTracker;
 import me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
+import me.jellysquid.mods.sodium.client.render.shadows.MakeupShadowMap;
 import me.jellysquid.mods.sodium.client.render.viewport.Viewport;
 import me.jellysquid.mods.sodium.client.util.NativeBuffer;
 import me.jellysquid.mods.sodium.client.world.WorldRendererExtended;
@@ -227,6 +228,10 @@ public class SodiumWorldRenderer {
      */
     public void drawChunkLayer(RenderLayer renderLayer, ChunkRenderMatrices matrices, double x, double y, double z) {
         if (renderLayer == RenderLayer.getSolid()) {
+            if (this.renderSectionManager != null) {
+                MakeupShadowMap.renderIfNeeded(this.renderSectionManager);
+            }
+
             this.renderSectionManager.renderLayer(matrices, DefaultTerrainRenderPasses.SOLID, x, y, z);
             this.renderSectionManager.renderLayer(matrices, DefaultTerrainRenderPasses.CUTOUT, x, y, z);
         } else if (renderLayer == RenderLayer.getTranslucent()) {

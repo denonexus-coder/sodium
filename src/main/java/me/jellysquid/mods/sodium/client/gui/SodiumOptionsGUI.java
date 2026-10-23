@@ -107,6 +107,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.pages.add(SodiumGameOptionPages.general());
         this.pages.add(SodiumGameOptionPages.quality());
         this.pages.add(SodiumGameOptionPages.visual());
+        this.pages.add(SodiumGameOptionPages.makeup());
         this.pages.add(SodiumGameOptionPages.experimental());
         this.pages.add(SodiumGameOptionPages.performance());
         this.pages.add(SodiumGameOptionPages.advanced());
@@ -256,11 +257,12 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private void computeLayout() {
         boolean compact = this.width < 560;
 
-        // On a short screen the one-column rail cannot show all pages: six built-in pages plus
-        // Flywheel and Vanillin put the last button under the footer. A two-column rail keeps
-        // every page reachable without a second scroll area. The wider rail is only used when
-        // there is still room for the option list beside it.
-        boolean shortScreen = this.height < 240 && this.width >= 320;
+        // On a short screen the one-column rail cannot show all pages: the built-in pages, the
+        // MakeUp page and the optional Flywheel/Vanillin pages put the last button under the
+        // footer. A two-column rail keeps every page reachable without a second scroll area, and
+        // the 300-pixel threshold leaves room for the eight or nine buttons a full install has.
+        // The wider rail is only used when there is still room for the option list beside it.
+        boolean shortScreen = this.height < 300 && this.width >= 320;
         this.railWidth = shortScreen ? 150 : (compact ? 88 : 92);
         this.detailVisible = this.width >= 600;
 

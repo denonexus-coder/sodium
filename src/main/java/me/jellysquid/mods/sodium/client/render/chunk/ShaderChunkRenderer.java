@@ -10,9 +10,11 @@ import me.jellysquid.mods.sodium.client.render.MakeupProfile;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.shader.*;
+import me.jellysquid.mods.sodium.client.render.shadows.MakeupShadowMap;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkMeshAttribute;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 import net.minecraft.util.Identifier;
+import org.lwjgl.opengl.GL11C;
 
 import java.util.Map;
 
@@ -25,6 +27,13 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     protected final RenderDevice device;
 
     protected GlProgram<ChunkShaderInterface> activeProgram;
+
+    /**
+     * Set while drawing the Low shadow map. The same chunk programs are used, but color writes
+     * are suppressed and the normal shadow-sampling define must not be compiled into the
+     * caster pass.
+     */
+    protected boolean shadowPass;
 
     public ShaderChunkRenderer(RenderDevice device, ChunkVertexType vertexType) {
         this.device = device;
@@ -43,7 +52,7 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     }
 
     private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options) {
-        boolean colored = ColoredLighting.isActive();
+        boolean colored = ColoredLighting.isActiveForShader();
         boolean analytic = colored && ColoredLighting.useAnalytic();
         int maxLights = analytic ? ColoredLighting.getMaxLights() : 0;
 
@@ -85,9 +94,22 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         } catch (RuntimeException first) {
             RuntimeException failure = first;
 
-            // Drop the optional paths cumulatively: first the smaller reflection, then the
-            // profile. Retrying the original options after the reflection failure would put the
-            // reflection back and make the fallback fail again on the same driver.
+            // Drop the optional paths cumulatively. The Low shadow sampler is the newest and
+            // most specialized path, so losing it must not cost the whole MakeUp profile. The
+            // reflection follows, and only then the profile itself.
+            if (attempt.profileShadows()) {
+                SodiumClientMod.logger().error("MakeUp Low shadow sampling failed to compile; retrying without it", failure);
+                MakeupShadowMap.markShaderUnavailable();
+                attempt = attempt.withProfileShadows(false);
+
+                try {
+                    return createShader(path, attempt, colored, analytic, maxLights);
+                } catch (RuntimeException nested) {
+                    nested.addSuppressed(failure);
+                    failure = nested;
+                }
+            }
+
             if (attempt.surfaceReflection()) {
                 SodiumClientMod.logger().error("Surface reflection shader failed to compile; retrying without reflection", failure);
                 attempt = attempt.withSurfaceReflection(false);
@@ -154,6 +176,19 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     protected void begin(TerrainRenderPass pass) {
         pass.startDrawing();
 
+        if (this.shadowPass) {
+            // The map only contains depth. Disable color writes after the layer has applied its
+            // own state, and submit both faces from the light's point of view.
+            GL11C.glColorMask(false, false, false, false);
+            GL11C.glDepthMask(true);
+            GL11C.glEnable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDepthFunc(GL11C.GL_LEQUAL);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL11C.glDisable(GL11C.GL_CULL_FACE);
+            GL11C.glEnable(GL11C.GL_POLYGON_OFFSET_FILL);
+            GL11C.glPolygonOffset(1.0F, 2.0F);
+        }
+
         // Iris owns the render path whenever it is installed. The shadow and reflection controls
         // are Sodium shader features, so they are forced off here even if the config file still
         // has them on from a run without Iris. The reverse-order pass is translucent terrain
@@ -161,12 +196,14 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         // Cutout is skipped as well: derivatives after a non-uniform discard are undefined, and
         // the effect is meant for solid ground rather than leaves and plants.
         boolean surfaceReflection = SodiumClientMod.options().experimental.surfaceReflection
+                && !this.shadowPass
                 && !ColoredLighting.isIrisLoaded()
                 && !pass.isReverseOrder()
                 && !pass.supportsFragmentDiscard();
         boolean makeupProfile = MakeupProfile.isEnabled();
+        boolean profileShadows = !this.shadowPass && MakeupProfile.isLowShadowsActive();
         ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType,
-                surfaceReflection, makeupProfile);
+                surfaceReflection, makeupProfile, profileShadows);
 
         this.activeProgram = this.compileProgram(options);
         this.activeProgram.bind();
@@ -179,6 +216,10 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         this.activeProgram = null;
 
         pass.endDrawing();
+
+        if (this.shadowPass) {
+            GL11C.glColorMask(true, true, true, true);
+        }
     }
 
     @Override

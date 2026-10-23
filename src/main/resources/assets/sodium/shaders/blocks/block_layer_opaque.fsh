@@ -20,7 +20,7 @@ uniform float u_ReflectionSoftness;
 
 #ifdef MAKEUP_NO_EFFECTS
 in vec3 v_MakeupBlock;
-in float v_MakeupSky;
+in vec2 v_MakeupLight;
 in vec3 v_MakeupViewPos;
 in vec3 v_MakeupWorldPos;
 in float v_MaterialWater;
@@ -28,6 +28,53 @@ in float v_MaterialTranslucent;
 
 uniform vec4 u_HandLight;
 uniform vec3 u_HandLightColor;
+uniform sampler2D u_LightTex;
+
+uniform int u_MakeupAmbient;
+
+#ifdef PROFILE_SHADOWS
+uniform sampler2D u_ProfileShadowMap;
+uniform mat4 u_ProfileShadowMatrix;
+uniform float u_ProfileShadowTexel;
+uniform int u_ProfileShadowActive;
+
+/**
+ * Four-tap PCF against the Low depth map. The sampler stores the depth of the nearest caster;
+ * the projection is orthographic and the map only covers 75 blocks around the player.
+ */
+float _makeup_shadow(vec3 worldPos, float ndl) {
+    if (u_ProfileShadowActive == 0) {
+        return 1.0;
+    }
+
+    vec4 shadowClip = u_ProfileShadowMatrix * vec4(worldPos, 1.0);
+    vec3 shadowCoord = shadowClip.xyz / max(shadowClip.w, 1.0e-5);
+    shadowCoord = shadowCoord * 0.5 + 0.5;
+
+    if (shadowCoord.x <= 0.001 || shadowCoord.x >= 0.999
+            || shadowCoord.y <= 0.001 || shadowCoord.y >= 0.999
+            || shadowCoord.z >= 0.999) {
+        return 1.0;
+    }
+
+    float bias = 0.0015 + 0.0025 * (1.0 - clamp(ndl, 0.0, 1.0));
+    float angle = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+    // Low uses four taps with SHADOW_BLUR=2; the rotated axis hides the small tap pattern.
+    vec2 axis = vec2(cos(angle), sin(angle)) * (u_ProfileShadowTexel * 2.0);
+    vec2 tangent = vec2(-axis.y, axis.x);
+
+    float lit = 0.0;
+    lit += step(shadowCoord.z - bias, texture(u_ProfileShadowMap, shadowCoord.xy + axis).r);
+    lit += step(shadowCoord.z - bias, texture(u_ProfileShadowMap, shadowCoord.xy - axis).r);
+    lit += step(shadowCoord.z - bias, texture(u_ProfileShadowMap, shadowCoord.xy + tangent).r);
+    lit += step(shadowCoord.z - bias, texture(u_ProfileShadowMap, shadowCoord.xy - tangent).r);
+
+    float shadow = lit * 0.25;
+    float distanceFade = 1.0 - smoothstep(60.0, 74.0, length(v_MakeupViewPos));
+
+    return mix(1.0, shadow, distanceFade);
+}
+#endif
 #endif
 
 uniform sampler2D u_BlockTex; // The block texture
@@ -86,13 +133,22 @@ void main() {
     // MakeUp's no-shadow direct term: the sun only reaches surfaces that see the sky, and the
     // ^10 ramp is what makes a roof, a cave or a north-facing wall lose the direct component
     // without a shadow map.
-    float directStrength = mix(0.0, ndl, pow(v_MakeupSky, 10.0)) * u_MakeupSun;
+    float directStrength = mix(0.0, ndl, pow(v_MakeupLight.y, 10.0)) * u_MakeupSun;
+
+#ifdef PROFILE_SHADOWS
+    directStrength *= _makeup_shadow(v_MakeupWorldPos, ndl);
+#endif
+
     float omniStrength = ((ndl + 1.0) * 0.25) + 0.75;
 
     // The omni and direct colours are uniforms, not varyings: both are constant for the frame,
     // and only visibleSky changes per vertex. This keeps the varying budget inside the GLES 3
     // minimum even when the surface reflection is compiled in at the same time.
-    vec3 omni = mix(u_MakeupOmniMin, u_MakeupOmniColor, v_MakeupSky);
+    // With the MakeUp ambient palette off, fall back to Sodium's normal sky lightmap column.
+    // The block and direct terms stay from the profile, so the toggle is a true A/B switch.
+    vec3 omni = u_MakeupAmbient != 0
+            ? mix(u_MakeupOmniMin, u_MakeupOmniColor, v_MakeupLight.y)
+            : texture(u_LightTex, vec2(0.0, v_MakeupLight.x)).rgb;
     // This is MakeUp's realLight sum: omni + direct + candle, with no extra ambient term.
     // The cave floor comes from omniMin (AVOID_DARK_LEVEL), not from a constant that would
     // also brighten every lit surface in open sky.
@@ -153,7 +209,7 @@ void main() {
 
 #ifdef MAKEUP_NO_EFFECTS
     if (u_MakeupFog > 0.5) {
-        fragColor = _makeup_fog(diffuseColor, v_FragDistance, v_MakeupSky);
+        fragColor = _makeup_fog(diffuseColor, v_FragDistance, v_MakeupLight.y);
     } else {
         // Turning the profile fog off must not leave the world without fog, and the Nether/End
         // fallback uses the same path. Keeping this branch also keeps the three vanilla fog

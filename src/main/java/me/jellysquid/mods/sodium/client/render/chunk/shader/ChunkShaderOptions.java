@@ -5,13 +5,13 @@ import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
-                                 boolean surfaceReflection, boolean makeupProfile) {
+                                 boolean surfaceReflection, boolean makeupProfile, boolean profileShadows) {
     public ChunkShaderOptions withSurfaceReflection(boolean value) {
         if (this.surfaceReflection == value) {
             return this;
         }
 
-        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile);
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile, this.profileShadows);
     }
 
     public ChunkShaderOptions withMakeupProfile(boolean value) {
@@ -19,7 +19,16 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             return this;
         }
 
-        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value);
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value, this.profileShadows);
+    }
+
+    public ChunkShaderOptions withProfileShadows(boolean value) {
+        if (this.profileShadows == value) {
+            return this;
+        }
+
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection,
+                this.makeupProfile, value);
     }
 
     public ShaderConstants constants() {
@@ -56,6 +65,10 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         // the same chunk attributes; only the light and water math changes.
         if (this.makeupProfile) {
             constants.add("MAKEUP_NO_EFFECTS");
+        }
+
+        if (this.profileShadows && this.makeupProfile) {
+            constants.add("PROFILE_SHADOWS");
         }
 
         return constants.build();

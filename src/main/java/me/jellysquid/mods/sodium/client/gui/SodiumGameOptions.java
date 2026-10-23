@@ -138,8 +138,9 @@ public class SodiumGameOptions {
 
         /**
          * The MakeUp "No Effects" profile, rebuilt inside the chunk shader instead of running the
-         * shader pack. It is deliberately independent from the colored shadows and the surface
-         * reflection: those keep their own switches and can be combined with this profile.
+         * shader pack. Surface reflection keeps its own switch and can be combined with it. The
+         * colored-shadow switch remains for the normal Sodium path, but is disabled and ignored
+         * while this profile is active, because the profile owns the terrain lighting.
          */
         public boolean makeupNoEffects = false;
 
@@ -148,6 +149,23 @@ public class SodiumGameOptions {
 
         /** MakeUp-style distance fog using the horizon colour of the profile sky. */
         public boolean makeupFog = true;
+
+        /**
+         * The profile's own colored block-light grid. It is independent from the global colored
+         * lighting switch so the MakeUp tab keeps its colored torches even when the normal
+         * Sodium colored engine is off. When the global engine is already on, its grid is reused.
+         */
+        public boolean makeupColoredGround = true;
+
+        /** MakeUp's omni/ambient palette; off falls back to the normal Sodium sky lightmap. */
+        public boolean makeupAmbient = true;
+
+        /**
+         * Adds MakeUp Low's real shadow map on top of the profile's directional shading. The
+         * map is 300x300, covers 75 blocks, uses four taps and owns all terrain shadows while it
+         * is enabled. Off keeps the faithful No Effects look without a shadow map.
+         */
+        public boolean makeupLowShadows = false;
 
         /** Water tint and the sky reflection on water and glass. */
         public boolean makeupWater = true;

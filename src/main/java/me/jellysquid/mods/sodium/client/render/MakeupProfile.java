@@ -88,6 +88,13 @@ public final class MakeupProfile {
                 && isOverworld();
     }
 
+    /** Low's optional real shadow map; Iris and the other dimensions never enable it. */
+    public static boolean isLowShadowsActive() {
+        return isEnabled()
+                && SodiumClientMod.options().experimental.makeupLowShadows
+                && isOverworld();
+    }
+
     /** The values the chunk shader and the sky pass need for the current frame. */
     public static Frame frame() {
         return frame(MinecraftClient.getInstance().world, MinecraftClient.getInstance().getTickDelta());
@@ -153,6 +160,7 @@ public final class MakeupProfile {
                 fogDensity, rain, skyBrightness, night,
                 sunX, sunY, sunZ,
                 settings.makeupSunLight,
+                settings.makeupAmbient,
                 settings.makeupWater,
                 settings.makeupWaterAbsorption / 100.0F,
                 settings.makeupWaterSkyReflection,
@@ -184,6 +192,7 @@ public final class MakeupProfile {
             float sunY,
             float sunZ,
             boolean sunLight,
+            boolean ambient,
             boolean water,
             float waterAbsorption,
             boolean waterSkyReflection,

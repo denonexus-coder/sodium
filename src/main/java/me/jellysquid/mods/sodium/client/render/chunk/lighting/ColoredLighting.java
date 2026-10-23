@@ -2,8 +2,11 @@ package me.jellysquid.mods.sodium.client.render.chunk.lighting;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
+import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightEngine;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightingPath;
+import me.jellysquid.mods.sodium.client.render.MakeupProfile;
+import me.jellysquid.mods.sodium.client.render.shadows.MakeupShadowMap;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.AbstractCandleBlock;
 import net.minecraft.block.Block;
@@ -275,6 +278,27 @@ public final class ColoredLighting {
         return getPath() != LightingPath.OFF && !shaderFailed && !isIrisShaderPackInUse();
     }
 
+    /**
+     * The MakeUp profile owns a small colored grid even when the global engine is off. This is
+     * what keeps placed torches colored on the ground instead of only coloring the held light.
+     * The grid is the existing 32x16x32 field, so enabling the global engine later reuses it.
+     */
+    public static boolean isProfileColoredGround() {
+        SodiumGameOptions options = SodiumClientMod.options();
+
+        return options != null
+                && options.experimental.makeupNoEffects
+                && options.experimental.makeupColoredGround
+                && !shaderFailed
+                && !isIrisLoaded()
+                && MakeupProfile.isOverworld();
+    }
+
+    /** The shader path, including the profile-owned grid. */
+    public static boolean isActiveForShader() {
+        return isActive() || isProfileColoredGround();
+    }
+
     public static boolean isEssl() {
         return isActive() && getPath() == LightingPath.ESSL;
     }
@@ -292,7 +316,8 @@ public final class ColoredLighting {
      * leaving the world without colored light.
      */
     public static boolean useAnalytic() {
-        return isActive() && !analyticFailed && getEngine() == LightEngine.ANALYTIC;
+        return isActiveForShader() && !analyticFailed && getEngine() == LightEngine.ANALYTIC
+                && getPath() != LightingPath.OFF;
     }
 
     public static int getMaxLights() {
@@ -466,13 +491,14 @@ public final class ColoredLighting {
     public static void markDirty() {
         gridDirty = true;
         AnalyticLighting.markDirty();
+        MakeupShadowMap.markDirty();
     }
 
     /** Client tick hook; the scan runs on the render thread, so it can upload the texture. */
     public static void tick() {
         MinecraftClient client = MinecraftClient.getInstance();
 
-        if (!isActive() || client.world == null || client.player == null || client.isPaused()) {
+        if (!isActiveForShader() || client.world == null || client.player == null || client.isPaused()) {
             return;
         }
 
