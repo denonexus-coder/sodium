@@ -50,6 +50,10 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private static final int ROW_HEIGHT = 20;
     private static final int SECTION_HEIGHT = 16;
     private static final int GROUP_GAP = 6;
+
+    // Lines of the tooltip shown while an option is hovered. The full text is only drawn when
+    // the user asks for it with Ctrl+X.
+    private static final int SUMMARY_LINES = 3;
     private static final int[] PAGE_ACCENTS = {
             0xFF4FC3F7, 0xFF8AD97B, 0xFFFFC15E, 0xFFFF7BCB, 0xFFB7A4F5, 0xFF63D8D2, 0xFFFF8FA3, 0xFFFFB067
     };
@@ -64,6 +68,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private int contentScroll, contentMaxScroll;
     private int detailScroll, detailMaxScroll;
     private @Nullable Option<?> detailOption;
+    private boolean showFullDescription;
     private boolean draggingContent;
     private double dragStartY;
     private int dragStartScroll;
@@ -549,7 +554,11 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         drawContext.fill(x, y, this.detailX + this.detailW - 8, y + 1, 0x22FFFFFF);
         y += 7;
 
-        List<OrderedText> lines = new ArrayList<>(this.textRenderer.wrapLines(option.getTooltip(), maxWidth));
+        List<OrderedText> lines = new ArrayList<>(this.textRenderer.wrapLines(
+                this.showFullDescription ? option.getTooltip() : this.summaryText(option.getTooltip(), maxWidth), maxWidth));
+
+        lines.add(Language.getInstance().reorder(Text.literal(this.showFullDescription ? "Ctrl+X: resumir" : "Ctrl+X: ver tudo")
+                .formatted(Formatting.DARK_GRAY)));
 
         int viewTop = y;
         int viewBottom = this.detailY + this.detailH - 6;
@@ -716,6 +725,36 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         return Text.literal("Impacto no desempenho: " + value).formatted(Formatting.GRAY);
     }
 
+    /**
+     * Cuts the description down to a few vertical lines. The cut is made at a sentence end when
+     * one fits, so the summary stops at a natural break instead of mid-phrase.
+     */
+    private Text summaryText(Text tooltip, int maxWidth) {
+        String value = tooltip.getString();
+        int budget = (maxWidth / 6) * SUMMARY_LINES;
+
+        if (value.length() <= budget) {
+            return tooltip;
+        }
+
+        int cut = -1;
+
+        for (int i = 0; i < value.length() && i <= budget; i++) {
+            char c = value.charAt(i);
+
+            if (c == '.' || c == '!' || c == '?' || c == '\n') {
+                cut = i + 1;
+            }
+        }
+
+        if (cut < (budget / 2)) {
+            int space = value.lastIndexOf(' ', budget);
+            cut = space > (budget / 2) ? space : budget;
+        }
+
+        return Text.literal(value.substring(0, cut).stripTrailing() + "…");
+    }
+
     private void renderOptionTooltip(DrawContext drawContext, ControlElement<?> element) {
         Dim2i dim = element.getDimensions();
 
@@ -727,14 +766,30 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         int boxY = dim.y();
         int boxX = dim.getLimitX() + boxPadding;
 
+        // The option rows span the whole content column, so there is never any room to the
+        // right of the control. When the box would leave the screen, it is flipped to the
+        // left side instead, and finally clamped so it stays visible even on windows that
+        // are narrower than the box itself.
+        if (boxX + boxWidth > this.width - 4) {
+            boxX = dim.x() - boxWidth - boxPadding;
+        }
+
+        boxX = MathHelper.clamp(boxX, 4, Math.max(4, this.width - boxWidth - 4));
+
         Option<?> option = element.getOption();
-        List<OrderedText> tooltip = new ArrayList<>(this.textRenderer.wrapLines(option.getTooltip(), boxWidth - (textPadding * 2)));
+        int textWidth = boxWidth - (textPadding * 2);
+
+        List<OrderedText> tooltip = new ArrayList<>(this.textRenderer.wrapLines(
+                this.showFullDescription ? option.getTooltip() : this.summaryText(option.getTooltip(), textWidth), textWidth));
 
         OptionImpact impact = option.getImpact();
 
         if (impact != null) {
             tooltip.add(Language.getInstance().reorder(impactLabel(impact)));
         }
+
+        tooltip.add(Language.getInstance().reorder(Text.literal(this.showFullDescription ? "Ctrl+X: resumir" : "Ctrl+X: ver tudo")
+                .formatted(Formatting.DARK_GRAY)));
 
         int boxHeight = (tooltip.size() * 12) + boxPadding;
         int boxYLimit = boxY + boxHeight;
@@ -744,6 +799,9 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         if (boxYLimit > boxYCutoff) {
             boxY -= boxYLimit - boxYCutoff;
         }
+
+        // A tooltip taller than the screen must not slide off the top either
+        boxY = Math.max(4, boxY);
 
         drawContext.fillGradient(boxX, boxY, boxX + boxWidth, boxY + boxHeight, 0xE0000000, 0xE0000000);
 
@@ -805,6 +863,13 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (this.prompt != null && this.prompt.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+
+        if (this.prompt == null && keyCode == GLFW.GLFW_KEY_X && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            this.showFullDescription = !this.showFullDescription;
+            this.detailScroll = 0;
+
             return true;
         }
 
