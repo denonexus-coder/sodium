@@ -1,0 +1,14 @@
+accessWidener v1 named
+
+# The sprite constructor is protected in vanilla. The cache needs to rebuild the
+# sprite list from the cached metadata without going through the stitcher.
+accessible method net/minecraft/client/texture/Sprite <init> (Lnet/minecraft/util/Identifier;Lnet/minecraft/client/texture/SpriteContents;IIII)V
+
+# The number of frames of a sprite. It is private in vanilla, but it is the only
+# way to tell an animated sprite from a static one.
+accessible method net/minecraft/client/texture/SpriteContents getFrameCount ()I
+
+# The source image and the dimensions of a single sprite.
+accessible field net/minecraft/client/texture/SpriteContents image Lnet/minecraft/client/texture/NativeImage;
+accessible field net/minecraft/client/texture/SpriteContents width I
+accessible field net/minecraft/client/texture/SpriteContents height I

@@ -39,3 +39,9 @@ jobs:
         with:
           name: sodium-artifacts-${{ steps.ref.outputs.branch }}
           path: build/libs/*.jar
+
+      - name: Upload atlas cache artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-cache-artifacts-${{ steps.ref.outputs.branch }}
+          path: atlas-cache/build/libs/*.jar

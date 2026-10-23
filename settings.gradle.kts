@@ -10,3 +10,9 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+
+// The atlas cache is a separate mod that is built and shipped next to Sodium.
+// It captures the texture atlases (and their full sprite metadata) into a
+// persistent cache and reuses that cache on later runs, so the atlas does not
+// have to be stitched again.
+include("atlas-cache")

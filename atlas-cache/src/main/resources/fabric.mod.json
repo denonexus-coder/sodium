@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "sodium_atlas_cache",
+  "version": "${version}",
+  "name": "Sodium Atlas Cache",
+  "description": "Captures the Minecraft texture atlases together with their complete sprite metadata into a persistent cache. On later runs the cache is validated and, when it is still valid, the atlas is not stitched again.",
+  "authors": [
+    {
+      "name": "denonexus-coder"
+    }
+  ],
+  "license": "Polyform-Shield-1.0.0",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "me.jellysquid.mods.sodium.atlascache.AtlasCacheMod"
+    ]
+  },
+  "accessWidener": "sodium_atlas_cache.accesswidener",
+  "mixins": [
+    "sodium_atlas_cache.mixins.json"
+  ],
+  "depends": {
+    "minecraft": "1.20.1",
+    "fabricloader": ">=0.16.0",
+    "java": ">=17"
+  }
+}
