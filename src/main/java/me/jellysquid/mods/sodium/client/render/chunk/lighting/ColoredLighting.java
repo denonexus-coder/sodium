@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightEngine;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightingPath;
+import me.jellysquid.mods.sodium.client.render.MakeupProfile;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.AbstractCandleBlock;
 import net.minecraft.block.Block;
@@ -296,6 +297,19 @@ public final class ColoredLighting {
         return isActive() && !analyticFailed && getEngine() == LightEngine.ANALYTIC;
     }
 
+    /**
+     * Whether the MakeUp profile asks for the colour of the sources placed in the world.
+     *
+     * <p>This is not the normal colored-light engine: the profile keeps its own light model and
+     * only borrows the colour of the sources, so a torch standing on the ground lights the
+     * ground around it exactly like the same torch lights it while it is in the hand. The normal
+     * engine stays off (see {@link #ENABLED}); this is not a user setting, it is part of the
+     * profile, so there is nothing to switch on.
+     */
+    public static boolean isProfileActive() {
+        return MakeupProfile.isEnabled();
+    }
+
     public static int getMaxLights() {
         return AnalyticLighting.getMaxLights();
     }
@@ -454,11 +468,13 @@ public final class ColoredLighting {
     public static void tick() {
         MinecraftClient client = MinecraftClient.getInstance();
 
-        if (!isActive() || client.world == null || client.player == null || client.isPaused()) {
+        // The profile needs the grid even when the normal engine is off: it is the field that
+        // carries the colour of the sources placed in the world.
+        if ((!isActive() && !isProfileActive()) || client.world == null || client.player == null || client.isPaused()) {
             return;
         }
 
-        if (useAnalytic()) {
+        if (isActive() && useAnalytic()) {
             AnalyticLighting.tick(client);
         } else {
             tickGrid(client);

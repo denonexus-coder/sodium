@@ -56,6 +56,12 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         // the same chunk attributes; only the light and water math changes.
         if (this.makeupProfile) {
             constants.add("MAKEUP_NO_EFFECTS");
+
+            // The profile lights the ground with the colour of the sources that are placed in
+            // the world, exactly like the block it lights in the hand. The field comes from the
+            // same grid the normal engine uses, but the profile keeps its own warm curve, so
+            // none of the normal engine is compiled in.
+            constants.add("MAKEUP_COLORED_LIGHTS");
         }
 
         return constants.build();

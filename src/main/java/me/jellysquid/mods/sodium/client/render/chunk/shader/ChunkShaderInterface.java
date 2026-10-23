@@ -203,7 +203,10 @@ public class ChunkShaderInterface {
             this.uniformMakeupTime = null;
         }
 
-        if (coloredLighting && !analyticLighting) {
+        // The MakeUp profile samples the same grid for the colour of the sources placed in the
+        // world. The normal engine is optional and stays off; the profile's sources are part of
+        // the profile, so they are always available while it is on.
+        if (!analyticLighting && (coloredLighting || options.makeupProfile())) {
             this.uniformColorLightTex = context.bindUniform("u_ColorLightTex", GlUniformInt::new);
             this.uniformColorLightOrigin = context.bindUniform("u_ColorLightOrigin", GlUniformFloat3v::new);
             this.uniformColorLightScale = context.bindUniform("u_ColorLightScale", GlUniformFloat3v::new);

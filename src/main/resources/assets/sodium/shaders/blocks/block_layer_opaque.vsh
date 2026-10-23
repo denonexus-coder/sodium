@@ -45,6 +45,47 @@ uniform vec4 u_HandLight;          // xyz: camera-relative hand position, w: int
 uniform vec3 u_HandLightColor;
 #endif
 
+// The grid atlas feeds the two paths that need a colour per world position: the normal Sodium
+// colored-light engine and the MakeUp profile's coloured sources. The profile has no analytic
+// list, so it always takes the grid branch.
+#if !defined(ANALYTIC_LIGHTING) && (defined(COLORED_LIGHTING) || defined(MAKEUP_COLORED_LIGHTS))
+uniform highp sampler2D u_ColorLightTex; // 2D atlas: X by (Y * Z) RGB cells
+uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
+uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
+
+/**
+ * The colour of the light sources around the player, sampled from the grid atlas.
+ *
+ * <p>The grid is uploaded as a 2D atlas: X pixels across, then a block of Y rows for every Z
+ * slice. Sample two adjacent slices and interpolate them by hand. Sampling the atlas as a 3D
+ * texture is not an option here: MobileGlues crashes in glTexImage3D on some devices.
+ */
+vec3 _colored_grid(vec3 worldPos) {
+    vec3 gridCoord = (worldPos - u_ColorLightOrigin) * u_ColorLightScale;
+
+    vec3 gridSize = 1.0 / u_ColorLightScale;
+    vec3 p = clamp(gridCoord, 0.0, 1.0) * gridSize;
+    float u = clamp(p.x, 0.5, gridSize.x - 0.5) / gridSize.x;
+    float y = clamp(p.y, 0.5, gridSize.y - 0.5);
+    float z0 = clamp(floor(p.z - 0.5), 0.0, gridSize.z - 1.0);
+    float z1 = min(z0 + 1.0, gridSize.z - 1.0);
+    float fz = fract(p.z - 0.5);
+    float v0 = (z0 * gridSize.y + y) / (gridSize.y * gridSize.z);
+    float v1 = (z1 * gridSize.y + y) / (gridSize.y * gridSize.z);
+    vec3 colored = mix(texture(u_ColorLightTex, vec2(u, v0)).rgb,
+                       texture(u_ColorLightTex, vec2(u, v1)).rgb, fz);
+
+    // Do not smear the border texel over every chunk outside the scanned volume. The grid only
+    // covers 32x16x32 blocks around the player; without this mask the clamped edge cell would
+    // colour the whole world, and would visibly flash whenever the grid was rebuilt.
+    vec3 edgeDist = min(gridCoord, vec3(1.0) - gridCoord);
+    float edge = min(min(edgeDist.x, edgeDist.y), edgeDist.z);
+    colored *= smoothstep(0.0, 0.08, edge);
+
+    return colored;
+}
+#endif
+
 #ifdef COLORED_LIGHTING
 // Positions in this shader are camera-relative. The shadow depth needs absolute world height,
 // so the camera's Y is passed separately instead of being folded into every vertex.
@@ -62,10 +103,6 @@ uniform float u_ShadowTint;
 uniform vec4 u_LightPos[MAX_LIGHTS];
 uniform vec3 u_LightColor[MAX_LIGHTS];
 uniform int u_LightCount;
-#else
-uniform highp sampler2D u_ColorLightTex; // 2D atlas: X by (Y * Z) RGB cells
-uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
-uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
 #endif
 
 /**
@@ -89,29 +126,7 @@ vec3 _colored_block(vec3 worldPos, vec2 lightCoord, out vec3 tint, out float col
         colored += u_LightColor[i] * (atten * u_LightPos[i].w);
     }
 #else
-    vec3 gridCoord = (worldPos - u_ColorLightOrigin) * u_ColorLightScale;
-
-    // The grid is uploaded as a 2D atlas: X pixels across, then a block of Y rows for every Z
-    // slice. Sample two adjacent slices and interpolate them by hand. Sampling the atlas as a
-    // 3D texture is not an option here: MobileGlues crashes in glTexImage3D on some devices.
-    vec3 gridSize = 1.0 / u_ColorLightScale;
-    vec3 p = clamp(gridCoord, 0.0, 1.0) * gridSize;
-    float u = clamp(p.x, 0.5, gridSize.x - 0.5) / gridSize.x;
-    float y = clamp(p.y, 0.5, gridSize.y - 0.5);
-    float z0 = clamp(floor(p.z - 0.5), 0.0, gridSize.z - 1.0);
-    float z1 = min(z0 + 1.0, gridSize.z - 1.0);
-    float fz = fract(p.z - 0.5);
-    float v0 = (z0 * gridSize.y + y) / (gridSize.y * gridSize.z);
-    float v1 = (z1 * gridSize.y + y) / (gridSize.y * gridSize.z);
-    vec3 colored = mix(texture(u_ColorLightTex, vec2(u, v0)).rgb,
-                       texture(u_ColorLightTex, vec2(u, v1)).rgb, fz);
-
-    // Do not smear the border texel over every chunk outside the scanned volume. The grid only
-    // covers 32x16x32 blocks around the player; without this mask the clamped edge cell would
-    // colour the whole world, and would visibly flash whenever the grid was rebuilt.
-    vec3 edgeDist = min(gridCoord, vec3(1.0) - gridCoord);
-    float edge = min(min(edgeDist.x, edgeDist.y), edgeDist.z);
-    colored *= smoothstep(0.0, 0.08, edge);
+    vec3 colored = _colored_grid(worldPos);
 #endif
 
     // The vanilla block-light column is a conservative gate: it is 0 in complete darkness and
@@ -183,6 +198,34 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
 
 #import <sodium:include/makeup.glsl>
 
+#ifdef MAKEUP_NO_EFFECTS
+#ifdef MAKEUP_COLORED_LIGHTS
+/**
+ * The profile's block light with the colour of the source that reaches the surface.
+ *
+ * <p>MakeUp's own warm curve stays the base, so the profile keeps the exact brightness and hue
+ * it has today. The coloured field only takes over where a source actually reaches, and the hand
+ * light keeps the profile's max() semantics, so the held block looks exactly like it does now.
+ */
+vec3 _makeup_colored_block(vec3 worldPos, vec2 lightCoord) {
+    vec3 colored = _colored_grid(worldPos);
+
+    // The vanilla block-light column is the gate: it is 0 in complete darkness and behind walls,
+    // so the colour never appears where there is no block light at all.
+    colored *= smoothstep(0.0, 0.08, lightCoord.x);
+
+    // The same curve the normal colored-light path uses: the source colour takes over the warm
+    // base as it gets stronger, and the warm base is untouched where no source reaches.
+    float amount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
+    vec3 block = mix(_makeup_candle(lightCoord), colored, amount);
+
+    // The hand light keeps the profile's max(): the held block replaces the warm candle where it
+    // is stronger, exactly as it does without the coloured sources.
+    return max(block, _makeup_hand(worldPos));
+}
+#endif
+#endif
+
 uvec3 _get_relative_chunk_coord(uint pos) {
     // Packing scheme is defined by LocalSectionIndex
     return uvec3(pos) >> uvec3(5u, 0u, 2u) & uvec3(7u, 3u, 7u);
@@ -228,6 +271,8 @@ void main() {
         vec3 makeupTint;
         float makeupColorAmount;
         v_MakeupBlock = _colored_block(position, _vert_tex_light_coord, makeupTint, makeupColorAmount);
+    #elif defined(MAKEUP_COLORED_LIGHTS)
+        v_MakeupBlock = _makeup_colored_block(position, _vert_tex_light_coord);
     #else
         v_MakeupBlock = _makeup_block(position, _vert_tex_light_coord);
     #endif
