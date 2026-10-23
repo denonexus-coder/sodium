@@ -56,6 +56,12 @@ uniform float u_ShadowStrength;
 uniform float u_ShadowDepth;
 uniform float u_ShadowTint;
 
+// Luz vibrante: lidos por frame das opções da aba Experimental, por isso ligar/desligar vale
+// imediatamente e não obriga a recarregar o renderizador.
+uniform float u_VibrantFalloff;       // 0.0 = rampa linear antiga; 1.0 = smoothstep da cor real
+uniform float u_VibrantToneMap;       // 0.0 = clamp 1.30; 1.0 = ombro exponencial a partir de 80%
+uniform float u_InvLightRadiusSq;     // 1 / raio^2 (12^2 ou 16^2), partilhado pela curva analítica e pela luz na mão
+
 #ifdef ANALYTIC_LIGHTING
 // A short list of nearby lights: position is camera-relative, w is the peak intensity, and the
 // color is the same palette value the hand light uses. There is no texture in this path.
@@ -66,6 +72,7 @@ uniform int u_LightCount;
 uniform highp sampler2D u_ColorLightTex; // 2D atlas: X by (Y * Z) RGB cells
 uniform vec3 u_ColorLightOrigin;   // Camera-relative corner of the grid
 uniform vec3 u_ColorLightScale;    // Reciprocal of the grid size
+uniform float u_ColorLightHeadroom; // 1.0 padrão; 1.5 com o pico ligado (sincronizado com upload())
 #endif
 
 /**
@@ -83,7 +90,7 @@ vec3 _colored_block(vec3 worldPos, vec2 lightCoord, out vec3 tint, out float col
     for (int i = 0; i < u_LightCount; i++) {
         vec3 delta = worldPos - u_LightPos[i].xyz;
         float distSq = dot(delta, delta);
-        float atten = max(0.0, 1.0 - distSq * (1.0 / 144.0));
+        float atten = max(0.0, 1.0 - distSq * u_InvLightRadiusSq);
         atten *= atten;
 
         colored += u_LightColor[i] * (atten * u_LightPos[i].w);
@@ -103,8 +110,11 @@ vec3 _colored_block(vec3 worldPos, vec2 lightCoord, out vec3 tint, out float col
     float fz = fract(p.z - 0.5);
     float v0 = (z0 * gridSize.y + y) / (gridSize.y * gridSize.z);
     float v1 = (z1 * gridSize.y + y) / (gridSize.y * gridSize.z);
+    // Os valores da grelha são guardados divididos pelo headroom (1.5 com o pico ligado); o
+    // shader multiplica de volta para recuperar o campo real, acima de 1.0 quando há fôlego.
     vec3 colored = mix(texture(u_ColorLightTex, vec2(u, v0)).rgb,
-                       texture(u_ColorLightTex, vec2(u, v1)).rgb, fz);
+                       texture(u_ColorLightTex, vec2(u, v1)).rgb, fz)
+            * u_ColorLightHeadroom;
 
     // Do not smear the border texel over every chunk outside the scanned volume. The grid only
     // covers 32x16x32 blocks around the player; without this mask the clamped edge cell would
@@ -122,18 +132,37 @@ vec3 _colored_block(vec3 worldPos, vec2 lightCoord, out vec3 tint, out float col
     // Keep the warm base only where no colored source reaches, so a distant lit area that was
     // not scanned still looks like vanilla instead of going black.
     vec3 warm = vec3(0.62, 0.50, 0.32) * lightCoord.x;
-    colorAmount = clamp(max(colored.r, max(colored.g, colored.b)) * 1.50, 0.0, 1.0);
+    float maxc = max(colored.r, max(colored.g, colored.b));
+    float amountOld = clamp(maxc * 1.50, 0.0, 1.0);
+    float amountNew = smoothstep(0.0, 0.06, maxc);
+    colorAmount = mix(amountOld, amountNew, u_VibrantFalloff);
     vec3 block = mix(warm, colored, colorAmount);
     tint = colored;
 
     if (u_HandLight.w > 0.0) {
         vec3 delta = worldPos - u_HandLight.xyz;
         float distSq = dot(delta, delta);
-        float atten = max(0.0, 1.0 - distSq * (1.0 / 144.0));
+        float atten = max(0.0, 1.0 - distSq * u_InvLightRadiusSq);
         block += u_HandLightColor * (atten * atten * u_HandLight.w);
     }
 
     return block;
+}
+
+// Ombro exponencial a partir de 80% do pico: só o canal mais brilhante é comprimido e os
+// restantes acompanham, preservando matiz e saturação. Alvo 8 bits — o resultado é clamped
+// a 1.0 pelo chamador.
+vec3 _vibrant_shoulder(vec3 c) {
+    const float knee = 0.80;
+    float peak = max(c.r, max(c.g, c.b));
+
+    if (peak <= knee) {
+        return c;
+    }
+
+    float span = 1.0 - knee;
+    float mapped = knee + span * (1.0 - exp(-(peak - knee) / span));
+    return c * (mapped / peak);
 }
 
 vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
@@ -177,7 +206,13 @@ vec3 _colored_light(vec3 worldPos, vec2 lightCoord) {
         block = mix(block, block * shade, amount * 0.30);
     }
 
-    return clamp(ambient + block + vec3(0.06), 0.0, 1.30);
+    vec3 lit = ambient + block + vec3(0.06);
+
+    if (u_VibrantToneMap > 0.5) {
+        return clamp(_vibrant_shoulder(lit), 0.0, 1.0);
+    }
+
+    return clamp(lit, 0.0, 1.30);
 }
 #endif
 

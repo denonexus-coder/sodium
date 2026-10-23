@@ -59,6 +59,12 @@ public class ChunkShaderInterface {
     private final GlUniformFloat uniformShadowDepth;
     private final GlUniformFloat uniformShadowTint;
 
+    // Luz vibrante: lidos por frame das opções experimentais.
+    private final GlUniformFloat uniformVibrantFalloff;
+    private final GlUniformFloat uniformVibrantToneMap;
+    private final GlUniformFloat uniformColorLightHeadroom;
+    private final GlUniformFloat uniformInvLightRadiusSq;
+
     // Surface reflection is an optional fragment path; the uniforms exist only when compiled in.
     private final GlUniformFloat uniformReflectionStrength;
     private final GlUniformFloat uniformReflectionSoftness;
@@ -132,11 +138,23 @@ public class ChunkShaderInterface {
             this.uniformShadowStrength = context.bindUniform("u_ShadowStrength", GlUniformFloat::new);
             this.uniformShadowDepth = context.bindUniform("u_ShadowDepth", GlUniformFloat::new);
             this.uniformShadowTint = context.bindUniform("u_ShadowTint", GlUniformFloat::new);
+            this.uniformVibrantToneMap = context.bindUniform("u_VibrantToneMap", GlUniformFloat::new);
         } else {
             this.uniformCameraY = null;
             this.uniformShadowStrength = null;
             this.uniformShadowDepth = null;
             this.uniformShadowTint = null;
+            this.uniformVibrantToneMap = null;
+        }
+
+        // _colored_block é chamado tanto pelo caminho normal como pelo perfil MakeUp, pelo que
+        // estes uniforms existem sempre que a iluminação colorida está compilada.
+        if (coloredLighting) {
+            this.uniformVibrantFalloff = context.bindUniform("u_VibrantFalloff", GlUniformFloat::new);
+            this.uniformInvLightRadiusSq = context.bindUniform("u_InvLightRadiusSq", GlUniformFloat::new);
+        } else {
+            this.uniformVibrantFalloff = null;
+            this.uniformInvLightRadiusSq = null;
         }
 
         if (options.surfaceReflection()) {
@@ -207,10 +225,12 @@ public class ChunkShaderInterface {
             this.uniformColorLightTex = context.bindUniform("u_ColorLightTex", GlUniformInt::new);
             this.uniformColorLightOrigin = context.bindUniform("u_ColorLightOrigin", GlUniformFloat3v::new);
             this.uniformColorLightScale = context.bindUniform("u_ColorLightScale", GlUniformFloat3v::new);
+            this.uniformColorLightHeadroom = context.bindUniform("u_ColorLightHeadroom", GlUniformFloat::new);
         } else {
             this.uniformColorLightTex = null;
             this.uniformColorLightOrigin = null;
             this.uniformColorLightScale = null;
+            this.uniformColorLightHeadroom = null;
         }
 
         if (analyticLighting) {
@@ -261,6 +281,10 @@ public class ChunkShaderInterface {
 
             // Leave the texture unit in the state the next renderer expects.
             GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
+
+            if (this.uniformColorLightHeadroom != null) {
+                this.uniformColorLightHeadroom.setFloat(ColoredLighting.getUploadHeadroom());
+            }
         }
 
         if (this.uniformHandLight != null) {
@@ -312,6 +336,18 @@ public class ChunkShaderInterface {
             this.uniformShadowStrength.setFloat(enabled ? percent(experimental.shadowStrength) : 0.0F);
             this.uniformShadowDepth.setFloat(enabled ? percent(experimental.shadowDepth) : 0.0F);
             this.uniformShadowTint.setFloat(enabled ? percent(experimental.shadowTint) : 0.0F);
+        }
+
+        if (this.uniformVibrantFalloff != null) {
+            var experimental = SodiumClientMod.options().experimental;
+
+            this.uniformVibrantFalloff.setFloat(experimental.vibrantFalloff ? 1.0F : 0.0F);
+            this.uniformInvLightRadiusSq.setFloat(ColoredLighting.invLightRadiusSq());
+        }
+
+        if (this.uniformVibrantToneMap != null) {
+            var experimental = SodiumClientMod.options().experimental;
+            this.uniformVibrantToneMap.setFloat(experimental.vibrantToneMap ? 1.0F : 0.0F);
         }
 
         if (this.uniformReflectionStrength != null) {

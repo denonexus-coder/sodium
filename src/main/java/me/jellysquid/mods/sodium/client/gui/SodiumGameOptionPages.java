@@ -761,6 +761,102 @@ public class SodiumGameOptionPages {
                         .build())
                 .build());
 
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Luz vibrante"))
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Cor fiel no decaimento"))
+                        .setTooltip(Text.literal(
+                                "Onde o campo colorido fica fraco, a imagem atual mistura com a base quente vanilla "
+                                        + "(laranja) e apaga a cor da fonte. Ligado, a matiz real da tocha, do alma, da "
+                                        + "frogluz e afins aparece desde o primeiro bloco até ao fim do alcance.\n\n"
+                                + "O que afeta: um uniform por frame no shader de chunks; não recarrega o shader nem "
+                                        + "reconstrói a grelha."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> opts.experimental.vibrantFalloff = value,
+                                opts -> opts.experimental.vibrantFalloff)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!irisPack)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Preservar cor no núcleo"))
+                        .setTooltip(Text.literal(
+                                "Aplica um ombro exponencial a partir de 80% do pico antes do clamp final. O núcleo "
+                                        + "próximo à fonte deixava de saturar em branco e perdia a matiz; com o ombro, a cor "
+                                        + "é comprimida e mantida perto de 1.0.\n\n"
+                                + "O que afeta: um uniform por frame; não recarrega o shader. Só existe no caminho normal "
+                                        + "da iluminação colorida: sem efeito com o perfil MakeUp No Effects ativo."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> opts.experimental.vibrantToneMap = value,
+                                opts -> opts.experimental.vibrantToneMap)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!irisPack)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Pico de brilho"))
+                        .setTooltip(Text.literal(
+                                "Leva o pico da luz de bloco de 1.0 para 1.5, dando fôlego ao campo colorido (no Rethinking "
+                                        + "Voxels as fontes chegam a 24). A grelha 8-bit guarda dividido por 1.5 e o shader "
+                                        + "multiplica de volta, sincronizado com o upload.\n\n"
+                                + "O que afeta: Java no cálculo da luz + um uniform por frame; marca a grelha para "
+                                        + "reconstruir ao alternar. Combine com Preservar cor no núcleo para o núcleo não "
+                                        + "saturar em branco."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> {
+                            opts.experimental.vibrantPeak = value;
+                            ColoredLighting.markDirty();
+                        }, opts -> opts.experimental.vibrantPeak)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!irisPack)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Soma aditiva de luzes"))
+                        .setTooltip(Text.literal(
+                                "Em vez de mostrar apenas a fonte dominante em cada célula, soma as contribuições de todas "
+                                        + "as fontes próximas (tocha + alma, lava + glowstone…), como no Rethinking Voxels. "
+                                        + "Sobreposições misturam cor em vez de uma apagar a outra.\n\n"
+                                + "O que afeta: Java no rebuild da grelha; reconstrói a grelha ao alternar. Somas acima de 1.0 "
+                                        + "são recortadas no upload — combine com Pico de brilho e Preservar cor no núcleo."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> {
+                            opts.experimental.vibrantAdditive = value;
+                            ColoredLighting.markDirty();
+                        }, opts -> opts.experimental.vibrantAdditive)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!irisPack)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Alcance de 16 blocos"))
+                        .setTooltip(Text.literal(
+                                "Passa o raio da luz de 12 para 16 blocos. A grelha, a lista analítica e a luz na mão usam "
+                                        + "o mesmo raio, para não quebrar a invariante de curva compartilhada.\n\n"
+                                + "O que afeta: Java no rebuild + um uniform por frame; reconstrói a grelha ao alternar. "
+                                        + "Nota: a grelha continua 32×16×32, pelo que o alcance vertical fica limitado aos 8 "
+                                        + "blocos acima/abaixo do jogador."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> {
+                            opts.experimental.vibrantRadius = value;
+                            ColoredLighting.markDirty();
+                        }, opts -> opts.experimental.vibrantRadius)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!irisPack)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Paleta saturada"))
+                        .setTooltip(Text.literal(
+                                "Usa uma versão mais saturada da paleta de cores (frogluz, sea lantern, alma e afins), mais "
+                                        + "próxima do Rethinking Voxels e menos pastel.\n\n"
+                                + "O que afeta: mapa de cores em Java; reconstrói grelha e lista analítica ao alternar. A "
+                                        + "luz na mão segue o mapa ao instante."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> {
+                            opts.experimental.vibrantPalette = value;
+                            ColoredLighting.markDirty();
+                        }, opts -> opts.experimental.vibrantPalette)
+                        .setImpact(OptionImpact.LOW)
+                        .setEnabled(!irisPack)
+                        .build())
+                .build());
+
         Option<Boolean> coloredShadows = OptionImpl.createBuilder(boolean.class, sodiumOpts)
                 .setName(Text.literal("Sombras coloridas"))
                 .setTooltip(Text.literal("Escurece e tinge a parte ambiente da luz onde a superfície está abrigada do céu e "

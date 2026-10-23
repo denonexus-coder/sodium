@@ -175,6 +175,26 @@ public class SodiumGameOptions {
 
         /** The profile's directional sun without a shadow map; the grass is lit by N·L. */
         public boolean makeupSunLight = true;
+
+        // ---- Luz vibrante (experimental) ------------------------------------------------
+
+        /** Cor fiel no decaimento da luz de bloco: o decaimento segue a matiz real da fonte em vez de virar laranja. */
+        public boolean vibrantFalloff = false;
+
+        /** Preservar cor no núcleo: ombro exponencial a partir de 80% do pico, comprime acima de 1.0 sem apagar a matiz (alvo 8 bits). */
+        public boolean vibrantToneMap = false;
+
+        /** Pico de brilho: leva o pico da luz de bloco de 1.0 para 1.5, dando fôlego ao campo colorido. */
+        public boolean vibrantPeak = false;
+
+        /** Soma aditiva de luzes: cada célula acumula todas as fontes próximas em vez de mostrar apenas a dominante. */
+        public boolean vibrantAdditive = false;
+
+        /** Alcance de 16 blocos: passa o raio da luz de 12 para 16 (grelha, lista analítica e luz na mão). */
+        public boolean vibrantRadius = false;
+
+        /** Paleta saturada: usa uma versão mais saturada da paleta de cores das fontes. */
+        public boolean vibrantPalette = false;
     }
 
     public enum LightEngine {

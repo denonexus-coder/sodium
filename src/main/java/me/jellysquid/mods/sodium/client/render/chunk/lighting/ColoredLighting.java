@@ -62,6 +62,9 @@ public final class ColoredLighting {
     public static final float LIGHT_RADIUS = 12.0F;
     private static final int LIGHT_RADIUS_SQ = (int) (LIGHT_RADIUS * LIGHT_RADIUS);
 
+    /** Pico do campo colorido quando Luz vibrante > Pico de brilho está ligado (1.5, como no Rethinking Voxels). */
+    public static final float LIGHT_PEAK = 1.5F;
+
     /**
      * The grid is rebuilt when the player moves further than this from the anchor used for the
      * previous rebuild. Moving every tick is what made the old version flicker.
@@ -202,6 +205,9 @@ public final class ColoredLighting {
         COLORS.put(Blocks.LARGE_AMETHYST_BUD, amethyst);
         COLORS.put(Blocks.MEDIUM_AMETHYST_BUD, amethystMedium);
         COLORS.put(Blocks.SMALL_AMETHYST_BUD, amethystSmall);
+
+        // Versão saturada de COLORS, usada quando Luz vibrante > Paleta saturada está ligada.
+        COLORS.forEach((block, color) -> COLORS_SATURATED.put(block, boostSaturation(color)));
     }
 
     // ---- Grid engine state ----------------------------------------------------------------
@@ -231,6 +237,13 @@ public final class ColoredLighting {
     private static int textureId;
     private static ByteBuffer uploadBuffer;
     private static int originX, originY, originZ;
+
+    /**
+     * Headroom usado no último upload da grelha (1.0 padrão, 1.5 com o pico ligado). Lido por
+     * setupState() para o uniform do shader decodificar a textura sincronizado com o que foi
+     * guardado, evitando brilho errado enquanto a grelha é reconstruída.
+     */
+    private static float uploadHeadroom = 1.0F;
 
     private static int anchorX, anchorY, anchorZ;
     private static boolean hasAnchor;
@@ -370,6 +383,25 @@ public final class ColoredLighting {
         }
 
         return textureId;
+    }
+
+    /** Headroom usado no último upload; o shader multiplica a amostra da grelha por este valor. */
+    public static float getUploadHeadroom() {
+        return uploadHeadroom;
+    }
+
+    /**
+     * Raio da luz: 12 por padrão, 16 com Luz vibrante > Alcance de 16 blocos. Partilhado pela
+     * grelha, pela lista analítica e pela luz na mão (invariante de curva partilhada).
+     */
+    public static float lightRadius() {
+        return SodiumClientMod.options().experimental.vibrantRadius ? 16.0F : 12.0F;
+    }
+
+    /** 1 / raio^2, para o shader aplicar a mesma curva de atenuação que a grelha e a luz na mão. */
+    public static float invLightRadiusSq() {
+        float radius = lightRadius();
+        return 1.0F / (radius * radius);
     }
 
     /**
@@ -566,6 +598,10 @@ public final class ColoredLighting {
     private static void diffuseGrid() {
         Arrays.fill(BEST_KEY, -1.0F);
 
+        // Raio da luz: 12 por padrão, 16 com Luz vibrante > Alcance de 16 blocos.
+        float radius = lightRadius();
+        float radiusSq = radius * radius;
+
         int groups = 0;
 
         for (int source = 0; source < sourceCount; source++) {
@@ -609,26 +645,35 @@ public final class ColoredLighting {
             for (int index = 0; index < CELLS; index++) {
                 float distSq = DIST_B[index];
 
-                if (distSq >= LIGHT_RADIUS_SQ) {
+                if (distSq >= radiusSq) {
                     continue;
                 }
 
-                float atten = 1.0F - distSq / (LIGHT_RADIUS * LIGHT_RADIUS);
+                float atten = 1.0F - distSq / radiusSq;
                 float attenuationSq = atten * atten;
-                float key = strength * attenuationSq;
-
-                if (key <= BEST_KEY[index]) {
-                    continue;
-                }
-
-                BEST_KEY[index] = key;
 
                 int base = ARG_B[index] * 8;
                 int cell = index * 3;
 
-                GRID[cell] = sources[base + 3] * attenuationSq;
-                GRID[cell + 1] = sources[base + 4] * attenuationSq;
-                GRID[cell + 2] = sources[base + 5] * attenuationSq;
+                if (SodiumClientMod.options().experimental.vibrantAdditive) {
+                    // Soma aditiva (estilo Rethinking Voxels): a célula acumula todas as fontes
+                    // que a alcançam, em vez de mostrar apenas a dominante.
+                    GRID[cell] += sources[base + 3] * attenuationSq;
+                    GRID[cell + 1] += sources[base + 4] * attenuationSq;
+                    GRID[cell + 2] += sources[base + 5] * attenuationSq;
+                } else {
+                    float key = strength * attenuationSq;
+
+                    if (key <= BEST_KEY[index]) {
+                        continue;
+                    }
+
+                    BEST_KEY[index] = key;
+
+                    GRID[cell] = sources[base + 3] * attenuationSq;
+                    GRID[cell + 1] = sources[base + 4] * attenuationSq;
+                    GRID[cell + 2] = sources[base + 5] * attenuationSq;
+                }
             }
         }
     }
@@ -803,6 +848,11 @@ public final class ColoredLighting {
             createTexture();
         }
 
+        // Headroom da grelha: com o pico ligado o campo chega a 1.5 e é guardado dividido por
+        // 1.5 no atlas RGB8; o shader multiplica de volta por u_ColorLightHeadroom. Este valor
+        // é lido por setupState(), assim textura e uniform nunca divergem ao alternar a opção.
+        uploadHeadroom = SodiumClientMod.options().experimental.vibrantPeak ? LIGHT_PEAK : 1.0F;
+
         ByteBuffer buffer = uploadBuffer;
         buffer.clear();
 
@@ -811,10 +861,10 @@ public final class ColoredLighting {
 
             if (value <= 0.0F) {
                 buffer.put((byte) 0);
-            } else if (value >= 1.0F) {
+            } else if (value >= uploadHeadroom) {
                 buffer.put((byte) 255);
             } else {
-                buffer.put((byte) (value * 255.0F));
+                buffer.put((byte) (value / uploadHeadroom * 255.0F));
             }
         }
 
@@ -864,7 +914,8 @@ public final class ColoredLighting {
      * grid has no item stack.
      */
     static float lightStrength(int luminance) {
-        return 0.55F + (0.45F * luminance / 15.0F);
+        float peak = SodiumClientMod.options().experimental.vibrantPeak ? LIGHT_PEAK : 1.0F;
+        return 0.55F + ((peak - 0.55F) * luminance / 15.0F);
     }
 
     private static float[] rgb(int hex) {
@@ -876,12 +927,31 @@ public final class ColoredLighting {
     }
 
     static float[] colorFor(Block block) {
-        float[] color = COLORS.get(block);
+        Map<Block, float[]> map =
+                SodiumClientMod.options().experimental.vibrantPalette ? COLORS_SATURATED : COLORS;
+
+        float[] color = map.get(block);
 
         if (color == null) {
             color = block instanceof AbstractCandleBlock ? CANDLE : NEUTRAL;
         }
 
         return color;
+    }
+
+    /** Empurra os canais para longe do cinzento (luma preservada), deixando as cores mais vivas. */
+    private static float[] boostSaturation(float[] c) {
+        float luma = 0.2126F * c[0] + 0.7152F * c[1] + 0.0722F * c[2];
+        float boost = 1.4F;
+
+        return new float[] {
+                saturate(luma + (c[0] - luma) * boost),
+                saturate(luma + (c[1] - luma) * boost),
+                saturate(luma + (c[2] - luma) * boost)
+        };
+    }
+
+    private static float saturate(float x) {
+        return x < 0.0F ? 0.0F : (x > 1.0F ? 1.0F : x);
     }
 }
