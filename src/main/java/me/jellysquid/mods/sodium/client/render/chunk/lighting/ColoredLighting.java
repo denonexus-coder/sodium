@@ -98,6 +98,9 @@ public final class ColoredLighting {
      */
     private static final Map<Block, float[]> COLORS = new HashMap<>();
 
+    // Versão saturada de COLORS, preenchida no fim do bloco static abaixo.
+    private static final Map<Block, float[]> COLORS_SATURATED = new HashMap<>();
+
     static {
         float[] fire = rgb(0xFF7722);
         float[] lava = rgb(0xFF8A1E);
