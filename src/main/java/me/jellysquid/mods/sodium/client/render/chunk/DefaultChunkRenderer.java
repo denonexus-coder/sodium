@@ -66,7 +66,6 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
     private final Map<Long, InstancedTemplate> templateCache = new ConcurrentHashMap<>();
     // Buffer de instâncias (translation vectors) - cresce on demand
     private GlBuffer instanceBuffer;
-    private StagingBuffer instanceStagingBuffer;
     private int instanceBufferCapacity = 0;
     // Log de ativação
     private boolean crossSectionFirstLog = true;
@@ -707,9 +706,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         }
 
         int stride = 12; // vec3 = 3 floats = 12 bytes
-        instanceStagingBuffer = commandList.createStagingBuffer(newCapacity * stride);
-        instanceBuffer = commandList.createBuffer(GL31C.GL_ARRAY_BUFFER, newCapacity * stride, 
-                GL31C.GL_DYNAMIC_DRAW, instanceStagingBuffer);
+        instanceBuffer = commandList.getRenderDevice().createMutableBuffer();
+        commandList.getRenderDevice().allocateStorage(instanceBuffer, (long) newCapacity * stride, GlBufferUsage.DYNAMIC_DRAW);
         instanceBufferCapacity = newCapacity;
 
         LOGGER.debug("[CrossSectionInstancing] Instance buffer grown to {} instances ({} KB)",
@@ -721,30 +719,31 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
      * @param offsets flat array of float[instanceCount * 3] (x, y, z per instance)
      */
     private void uploadInstanceOffsets(CommandList commandList, float[] offsets) {
-        if (instanceStagingBuffer == null) return;
+        if (instanceBuffer == null) return;
         
-        var mapped = instanceStagingBuffer.map();
-        mapped.asFloatBuffer().put(offsets);
-        instanceStagingBuffer.unmap();
-        
-        commandList.copyBuffer(instanceStagingBuffer, 0, instanceBuffer, 0, offsets.length * 4);
+        // Map buffer, write data, unmap
+        var mapping = commandList.getRenderDevice().mapBuffer(instanceBuffer, 0, offsets.length * 4, EnumBitField.of(GlBufferMapFlags.MAP_WRITE_BIT, GlBufferMapFlags.MAP_INVALIDATE_BUFFER_BIT));
+        var floatBuffer = mapping.asFloatBuffer();
+        floatBuffer.put(offsets);
+        commandList.getRenderDevice().unmap(mapping);
     }
 
     /**
      * Executes an instanced draw call for cross-section instancing.
-     * Uses glDrawElementsInstanced with the shared index buffer.
+     * Uses glDrawElementsInstancedBaseVertex directly via LWJGL.
      */
     private void executeInstancedDraw(CommandList commandList, GlTessellation tessellation, 
                                        int indexCount, int baseVertex, int instanceCount) {
         try (DrawCommandList drawCommandList = commandList.beginTessellating(tessellation)) {
-            // glDrawElementsInstanced(mode, count, type, indices, instancecount)
-            // We use baseVertex via the UBO or by binding the index buffer with offset
-            // For instanced draw with baseVertex, we need to use the multi-draw path or 
-            // ensure the index buffer covers the range
-            drawCommandList.drawElementsInstancedBaseVertex(
-                    GlPrimitiveType.TRIANGLES,
+            // Use LWJGL directly for instanced draw with baseVertex
+            // Bind the index buffer first
+            drawCommandList.flush(); // Ensure state is set
+            
+            // Call raw GL function for instanced draw with baseVertex
+            GL31C.glDrawElementsInstancedBaseVertex(
+                    GL31C.GL_TRIANGLES,
                     indexCount,
-                    GlIndexType.UNSIGNED_INT,
+                    GL31C.GL_UNSIGNED_INT,
                     0, // index offset (bytes)
                     instanceCount,
                     baseVertex

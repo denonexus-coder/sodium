@@ -64,7 +64,7 @@ public class TextureUtil {
         
         // Load the texture
         try {
-            NativeImage image = NativeImage.read(SodiumClientMod.getResourceManager().getResourceOrThrow(id).getInputStream());
+            NativeImage image = NativeImage.read(MinecraftClient.getInstance().getResourceManager().getResourceOrThrow(id).getInputStream());
             int textureId = textureManager.getTexture(id).getGlId();
             
             // Upload the image data
@@ -79,7 +79,7 @@ public class TextureUtil {
             
             return textureId;
         } catch (IOException e) {
-            SodiumClientMod.LOGGER.error("Failed to load MakeUp texture: {}", name, e);
+            SodiumClientMod.logger().error("Failed to load MakeUp texture: {}", name, e);
             return 0;
         }
     }
