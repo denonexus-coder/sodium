@@ -62,27 +62,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
     private boolean coalescingFirstLog = true;
 
     // ── Cross-Section Instancing ────────────────────────────────────────────────
-    // Cache de templates de geometria: hash -> (vertexBuffer, indexCount, vertexStride, vertexCount)
-    private final Map<Long, InstancedTemplate> templateCache = new ConcurrentHashMap<>();
-    // Buffer de instâncias (translation vectors) - cresce on demand
-    private GlBuffer instanceBuffer;
-    private int instanceBufferCapacity = 0;
     // Log de ativação
     private boolean crossSectionFirstLog = true;
-
-    // Record para template de geometria instanciada
-    private record InstancedTemplate(
-            GlBuffer vertexBuffer,
-            int vertexCount,
-            int vertexStride,
-            int indexCount,
-            GlTessellation tessellation
-    ) {
-        public void delete(CommandList commandList) {
-            if (vertexBuffer != null) vertexBuffer.delete(commandList);
-            if (tessellation != null) tessellation.delete(commandList);
-        }
-    }
 
     public DefaultChunkRenderer(RenderDevice device, ChunkVertexType vertexType) {
         super(device, vertexType);
@@ -665,60 +646,6 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                 }),
                 TessellationBinding.forElementBuffer(this.sharedIndexBuffer.getBufferObject())
         });
-    }
-
-    // ── Cross-Section Instancing: Create instanced tessellation (VAO) ─────────────
-    /**
-     * Creates a VAO with the same vertex attributes as the region tessellation,
-     * plus an instance attribute (location 10) for the instance offset.
-     * The instance buffer is bound with divisor=1 so it advances once per instance.
-     */
-    private GlTessellation createInstancedTessellation(CommandList commandList, GlBuffer vertexBuffer, int vertexStride) {
-        return commandList.createTessellation(GlPrimitiveType.TRIANGLES, new TessellationBinding[] {
-                TessellationBinding.forVertexBuffer(vertexBuffer, new GlVertexAttributeBinding[] {
-                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_POSITION,
-                                this.vertexFormat.getAttribute(ChunkMeshAttribute.POSITION)),
-                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_COLOR,
-                                this.vertexFormat.getAttribute(ChunkMeshAttribute.COLOR)),
-                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_TEXTURE,
-                                this.vertexFormat.getAttribute(ChunkMeshAttribute.TEXTURE)),
-                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_LIGHT_MATERIAL_INDEX,
-                                this.vertexFormat.getAttribute(ChunkMeshAttribute.LIGHT_MATERIAL_INDEX))
-                }),
-                // Instance attribute: location 10 (a_InstanceOffset in shader)
-                TessellationBinding.forVertexBuffer(instanceBuffer, new GlVertexAttributeBinding[] {
-                        new GlVertexAttributeBinding(10, 3, 0, false, 12, 0) // vec3, offset 0, stride 12 (3*4)
-                }).setInstanceDivisor(1),
-                TessellationBinding.forElementBuffer(this.sharedIndexBuffer.getBufferObject())
-        });
-    }
-
-    /**
-     * Ensures the instance buffer has enough capacity for the given number of instances.
-     * Grows exponentially to avoid frequent reallocations.
-     * TODO: Implement when RenderDevice API is stabilized.
-     */
-    private void ensureInstanceBufferCapacity(CommandList commandList, int requiredInstances) {
-        // TODO: Implement instance buffer allocation
-    }
-
-    /**
-     * Uploads instance offsets to the instance buffer.
-     * @param offsets flat array of float[instanceCount * 3] (x, y, z per instance)
-     * TODO: Implement when RenderDevice API is stabilized.
-     */
-    private void uploadInstanceOffsets(CommandList commandList, float[] offsets) {
-        // TODO: Implement instance buffer upload
-    }
-
-    /**
-     * Executes an instanced draw call for cross-section instancing.
-     * TODO: Implement when DrawCommandList API supports instanced draws.
-     */
-    private void executeInstancedDraw(CommandList commandList, GlTessellation tessellation, 
-                                       int indexCount, int baseVertex, int instanceCount) {
-        // TODO: Implement instanced draw when API supports it
-        // For now, fall back to regular draws
     }
 
     private static void executeDrawBatch(CommandList commandList, GlTessellation tessellation, MultiDrawBatch batch) {
