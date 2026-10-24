@@ -497,15 +497,17 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         
         // Log detalhado no primeiro frame
         if (crossSectionFirstLog) {
-            LOGGER.info("[Sodium] Cross-Section Instancing DRAW: hash=0x{} instances={} indexCount={} baseVertex={}",
+            LOGGER.info("[Sodium] Cross-Section Instancing DETECTED: hash=0x{} instances={} indexCount={} baseVertex={} (falling back to regular draws)",
                     Long.toHexString(geometryHash), instanceCount, totalIndexCount, baseVertex);
         }
         
-        // Executa draw instanciado
-        executeInstancedDraw(commandList, template.tessellation, totalIndexCount, baseVertex, instanceCount);
+        // Fallback to regular draws (instanced draw path TODO)
+        for (SectionDrawData data : group) {
+            addDrawCommands(batch, data.pMeshData, data.slices);
+        }
         
         FrameTrace.inc(FrameTrace.MULTIDRAW_CALLS);
-        FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, instanceCount - 1); // economizamos instanceCount-1 draws
+        FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, instanceCount - 1); // would save instanceCount-1 draws with instancing
     }
     // Dados para draw de uma secao (usado no cross-section instancing)
     private static final class SectionDrawData {
@@ -694,61 +696,29 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
     /**
      * Ensures the instance buffer has enough capacity for the given number of instances.
      * Grows exponentially to avoid frequent reallocations.
+     * TODO: Implement when RenderDevice API is stabilized.
      */
     private void ensureInstanceBufferCapacity(CommandList commandList, int requiredInstances) {
-        if (requiredInstances <= instanceBufferCapacity) return;
-
-        int newCapacity = Math.max(instanceBufferCapacity * 2, MathUtil.ceilPowerOfTwo(requiredInstances));
-        if (newCapacity < 256) newCapacity = 256; // minimum
-
-        if (instanceBuffer != null) {
-            instanceBuffer.delete(commandList);
-        }
-
-        int stride = 12; // vec3 = 3 floats = 12 bytes
-        instanceBuffer = commandList.getRenderDevice().createMutableBuffer();
-        commandList.getRenderDevice().allocateStorage(instanceBuffer, (long) newCapacity * stride, GlBufferUsage.DYNAMIC_DRAW);
-        instanceBufferCapacity = newCapacity;
-
-        LOGGER.debug("[CrossSectionInstancing] Instance buffer grown to {} instances ({} KB)",
-                newCapacity, (newCapacity * stride) / 1024);
+        // TODO: Implement instance buffer allocation
     }
 
     /**
      * Uploads instance offsets to the instance buffer.
      * @param offsets flat array of float[instanceCount * 3] (x, y, z per instance)
+     * TODO: Implement when RenderDevice API is stabilized.
      */
     private void uploadInstanceOffsets(CommandList commandList, float[] offsets) {
-        if (instanceBuffer == null) return;
-        
-        // Map buffer, write data, unmap
-        var mapping = commandList.getRenderDevice().mapBuffer(instanceBuffer, 0, offsets.length * 4, EnumBitField.of(GlBufferMapFlags.MAP_WRITE_BIT, GlBufferMapFlags.MAP_INVALIDATE_BUFFER_BIT));
-        var floatBuffer = mapping.asFloatBuffer();
-        floatBuffer.put(offsets);
-        commandList.getRenderDevice().unmap(mapping);
+        // TODO: Implement instance buffer upload
     }
 
     /**
      * Executes an instanced draw call for cross-section instancing.
-     * Uses glDrawElementsInstancedBaseVertex directly via LWJGL.
+     * TODO: Implement when DrawCommandList API supports instanced draws.
      */
     private void executeInstancedDraw(CommandList commandList, GlTessellation tessellation, 
                                        int indexCount, int baseVertex, int instanceCount) {
-        try (DrawCommandList drawCommandList = commandList.beginTessellating(tessellation)) {
-            // Use LWJGL directly for instanced draw with baseVertex
-            // Bind the index buffer first
-            drawCommandList.flush(); // Ensure state is set
-            
-            // Call raw GL function for instanced draw with baseVertex
-            GL31C.glDrawElementsInstancedBaseVertex(
-                    GL31C.GL_TRIANGLES,
-                    indexCount,
-                    GL31C.GL_UNSIGNED_INT,
-                    0, // index offset (bytes)
-                    instanceCount,
-                    baseVertex
-            );
-        }
+        // TODO: Implement instanced draw when API supports it
+        // For now, fall back to regular draws
     }
 
     private static void executeDrawBatch(CommandList commandList, GlTessellation tessellation, MultiDrawBatch batch) {
