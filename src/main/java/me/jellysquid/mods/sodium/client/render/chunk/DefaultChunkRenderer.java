@@ -24,15 +24,31 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexTy
 import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
 import me.jellysquid.mods.sodium.client.util.BitwiseMath;
 import me.jellysquid.mods.sodium.client.util.FrameTrace;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.system.MemoryUtil;
 
+import java.util.ArrayList;
 import java.util.Iterator;
 
 public class DefaultChunkRenderer extends ShaderChunkRenderer {
+    private static final Logger LOGGER = LogManager.getLogger("Sodium-MultiRegionCoalescing");
+
+    // Fallback single-region batch (used when coalescing is OFF)
     private final MultiDrawBatch batch;
 
     private final SharedQuadIndexBuffer sharedIndexBuffer;
+
+    // ── Multi-Region Coalescing ────────────────────────────────────────────────
+    // A pool of MultiDrawBatch objects (one per visible region per frame).  The
+    // pool grows on demand and is never shrunk; individual batches are cleared at
+    // the top of each fill, not freed, so no native allocations happen mid-frame.
+    private final ArrayList<MultiDrawBatch> batchPool    = new ArrayList<>();
+    private final ArrayList<GlTessellation> coalesceTess = new ArrayList<>();
+    private final ArrayList<RenderRegion>   coalesceRegions = new ArrayList<>();
+    // Log the first time the path is taken so the player/dev can confirm activation.
+    private boolean coalescingFirstLog = true;
 
     public DefaultChunkRenderer(RenderDevice device, ChunkVertexType vertexType) {
         super(device, vertexType);
@@ -52,7 +68,9 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
         super.begin(renderPass);
 
-        boolean useBlockFaceCulling = SodiumClientMod.options().performance.useBlockFaceCulling;
+        boolean useBlockFaceCulling       = SodiumClientMod.options().performance.useBlockFaceCulling;
+        boolean useInstancedFaceCompaction = SodiumClientMod.options().performance.useInstancedFaceCompaction;
+        boolean useMultiRegionCoalescing   = SodiumClientMod.options().performance.useMultiRegionCoalescing;
 
         // Widening the visible faces to a contiguous run (see expandToGeometryRun) puts
         // back-facing triangles back into the batch on the strength of GL discarding them, so
@@ -69,30 +87,44 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         shader.setProjectionMatrix(matrices.projection());
         shader.setModelViewMatrix(matrices.modelView());
 
+        if (useMultiRegionCoalescing) {
+            renderCoalesced(commandList, renderLists, renderPass, camera, shader,
+                            useBlockFaceCulling, useInstancedFaceCompaction, cullFaceEnabled);
+        } else {
+            renderPerRegion(commandList, renderLists, renderPass, camera, shader,
+                            useBlockFaceCulling, useInstancedFaceCompaction, cullFaceEnabled);
+        }
+
+        super.end(renderPass);
+        FrameTrace.addTime(FrameTrace.T_RENDER, tRender);
+    }
+
+    // ── Path A: classic per-region fill-then-draw (original behaviour) ─────────
+    private void renderPerRegion(CommandList commandList,
+                                 ChunkRenderListIterable renderLists,
+                                 TerrainRenderPass renderPass,
+                                 CameraTransform camera,
+                                 ChunkShaderInterface shader,
+                                 boolean useBlockFaceCulling,
+                                 boolean useInstancedFaceCompaction,
+                                 boolean cullFaceEnabled) {
+
         Iterator<ChunkRenderList> iterator = renderLists.iterator(renderPass.isReverseOrder());
 
         while (iterator.hasNext()) {
             ChunkRenderList renderList = iterator.next();
-
             FrameTrace.inc(FrameTrace.REGION_VISITED);
 
-            var region = renderList.getRegion();
+            var region  = renderList.getRegion();
             var storage = region.getStorage(renderPass);
-
-            if (storage == null) {
-                FrameTrace.inc(FrameTrace.REGION_NO_STORAGE);
-                continue;
-            }
+            if (storage == null) { FrameTrace.inc(FrameTrace.REGION_NO_STORAGE); continue; }
 
             final long tFill = FrameTrace.now();
-            boolean useInstancedFaceCompaction = SodiumClientMod.options().performance.useInstancedFaceCompaction;
-            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction);
+            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass,
+                              useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction);
             FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
-            if (this.batch.isEmpty()) {
-                FrameTrace.inc(FrameTrace.REGION_EMPTY);
-                continue;
-            }
+            if (this.batch.isEmpty()) { FrameTrace.inc(FrameTrace.REGION_EMPTY); continue; }
 
             FrameTrace.inc(FrameTrace.REGION_DRAWN);
             FrameTrace.add(FrameTrace.SUBDRAWS_POST, this.batch.size);
@@ -103,7 +135,6 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             FrameTrace.addTime(FrameTrace.T_ENSURE, tEnsure);
 
             var tessellation = this.prepareTessellation(commandList, region);
-
             setModelMatrixUniforms(shader, region, camera);
 
             FrameTrace.inc(FrameTrace.MULTIDRAW_CALLS);
@@ -113,10 +144,102 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             FrameTrace.addTime(FrameTrace.T_DRAW, tDraw);
             FrameTrace.afterRegionDraw();
         }
+    }
 
-        super.end(renderPass);
+    // ── Path B: Multi-Region Coalescing ───────────────────────────────────────
+    //
+    // Two explicit phases:
+    //   Phase 1 – FILL   : pure CPU work; iterates all visible regions, builds
+    //                       one MultiDrawBatch per region from the pool (no native
+    //                       alloc after warm-up), and pre-warms the shared index
+    //                       buffer to the maximum size required.
+    //   Phase 2 – DISPATCH: pure GPU submission; iterates the collected
+    //                       (tessellation, batch, region) triples and calls
+    //                       executeDrawBatch for each.
+    //
+    // Separating the phases keeps the CPU fill hot in L1/L2 and avoids the
+    // CPU-stall that happens when the driver must flush a partially-filled
+    // command queue in the middle of the fill loop on TBDR architectures.
+    private void renderCoalesced(CommandList commandList,
+                                 ChunkRenderListIterable renderLists,
+                                 TerrainRenderPass renderPass,
+                                 CameraTransform camera,
+                                 ChunkShaderInterface shader,
+                                 boolean useBlockFaceCulling,
+                                 boolean useInstancedFaceCompaction,
+                                 boolean cullFaceEnabled) {
 
-        FrameTrace.addTime(FrameTrace.T_RENDER, tRender);
+        coalesceTess.clear();
+        coalesceRegions.clear();
+        int poolIdx = 0;
+        int maxIndexBufSize = 0;
+
+        // ── Phase 1: FILL ─────────────────────────────────────────────────────
+        Iterator<ChunkRenderList> iterator = renderLists.iterator(renderPass.isReverseOrder());
+
+        while (iterator.hasNext()) {
+            ChunkRenderList renderList = iterator.next();
+            FrameTrace.inc(FrameTrace.REGION_VISITED);
+
+            var region  = renderList.getRegion();
+            var storage = region.getStorage(renderPass);
+            if (storage == null) { FrameTrace.inc(FrameTrace.REGION_NO_STORAGE); continue; }
+
+            // Grow pool on demand (only happens the first few frames).
+            if (poolIdx >= batchPool.size()) {
+                batchPool.add(new MultiDrawBatch((ModelQuadFacing.COUNT * RenderRegion.REGION_SIZE) + 1));
+            }
+            MultiDrawBatch regionBatch = batchPool.get(poolIdx);
+
+            final long tFill = FrameTrace.now();
+            fillCommandBuffer(regionBatch, region, storage, renderList, camera, renderPass,
+                              useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction);
+            FrameTrace.addTime(FrameTrace.T_FILL, tFill);
+
+            if (regionBatch.isEmpty()) { FrameTrace.inc(FrameTrace.REGION_EMPTY); continue; }
+
+            FrameTrace.inc(FrameTrace.REGION_DRAWN);
+            FrameTrace.add(FrameTrace.SUBDRAWS_POST, regionBatch.size);
+            FrameTrace.histPostMerge(regionBatch.size);
+
+            // Track the maximum index-buffer requirement across all regions so we
+            // can call ensureCapacity once before the dispatch phase.
+            int ibSize = regionBatch.getIndexBufferSize();
+            if (ibSize > maxIndexBufSize) maxIndexBufSize = ibSize;
+
+            // Prepare tessellation (VAO) during fill phase so it is ready for dispatch.
+            GlTessellation tess = this.prepareTessellation(commandList, region);
+            coalesceTess.add(tess);
+            coalesceRegions.add(region);
+            poolIdx++;
+        }
+
+        // Nothing visible – nothing to dispatch.
+        if (coalesceTess.isEmpty()) return;
+
+        // One-time log to confirm the path is active.
+        if (coalescingFirstLog) {
+            LOGGER.info("[Sodium] Multi-Region Coalescing ATIVO — {} regiões agrupadas; " +
+                        "fase de preenchimento separada da fase de despacho (TBDR-friendly).",
+                        coalesceTess.size());
+            coalescingFirstLog = false;
+        }
+
+        // ── Ensure index buffer covers the largest batch ───────────────────────
+        final long tEnsure = FrameTrace.now();
+        this.sharedIndexBuffer.ensureCapacity(commandList, maxIndexBufSize);
+        FrameTrace.addTime(FrameTrace.T_ENSURE, tEnsure);
+
+        // ── Phase 2: DISPATCH ─────────────────────────────────────────────────
+        for (int i = 0; i < coalesceTess.size(); i++) {
+            setModelMatrixUniforms(shader, coalesceRegions.get(i), camera);
+            FrameTrace.inc(FrameTrace.MULTIDRAW_CALLS);
+            FrameTrace.beforeRegionDraw();
+            final long tDraw = FrameTrace.now();
+            executeDrawBatch(commandList, coalesceTess.get(i), batchPool.get(i));
+            FrameTrace.addTime(FrameTrace.T_DRAW, tDraw);
+            FrameTrace.afterRegionDraw();
+        }
     }
 
     private static void fillCommandBuffer(MultiDrawBatch batch,
@@ -358,5 +481,11 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
         this.sharedIndexBuffer.delete(commandList);
         this.batch.delete();
+
+        // Free all pooled batches accumulated by the coalescing path.
+        for (MultiDrawBatch b : batchPool) {
+            b.delete();
+        }
+        batchPool.clear();
     }
 }
