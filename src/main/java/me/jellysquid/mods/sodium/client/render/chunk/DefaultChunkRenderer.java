@@ -437,7 +437,6 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
     @SuppressWarnings("IntegerMultiplicationImplicitCastToLong")
     private static void addDrawCommands(MultiDrawBatch batch, long pMeshData, int mask) {
-    private static void addDrawCommands(MultiDrawBatch batch, long pMeshData, int mask) {
         final var pBaseVertex = batch.pBaseVertex;
         final var pElementCount = batch.pElementCount;
 
@@ -575,6 +574,92 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                 }),
                 TessellationBinding.forElementBuffer(this.sharedIndexBuffer.getBufferObject())
         });
+    }
+
+    // ── Cross-Section Instancing: Create instanced tessellation (VAO) ─────────────
+    /**
+     * Creates a VAO with the same vertex attributes as the region tessellation,
+     * plus an instance attribute (location 10) for the instance offset.
+     * The instance buffer is bound with divisor=1 so it advances once per instance.
+     */
+    private GlTessellation createInstancedTessellation(CommandList commandList, GlBuffer vertexBuffer, int vertexStride) {
+        return commandList.createTessellation(GlPrimitiveType.TRIANGLES, new TessellationBinding[] {
+                TessellationBinding.forVertexBuffer(vertexBuffer, new GlVertexAttributeBinding[] {
+                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_POSITION,
+                                this.vertexFormat.getAttribute(ChunkMeshAttribute.POSITION)),
+                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_COLOR,
+                                this.vertexFormat.getAttribute(ChunkMeshAttribute.COLOR)),
+                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_TEXTURE,
+                                this.vertexFormat.getAttribute(ChunkMeshAttribute.TEXTURE)),
+                        new GlVertexAttributeBinding(ChunkShaderBindingPoints.ATTRIBUTE_LIGHT_MATERIAL_INDEX,
+                                this.vertexFormat.getAttribute(ChunkMeshAttribute.LIGHT_MATERIAL_INDEX))
+                }),
+                // Instance attribute: location 10 (a_InstanceOffset in shader)
+                TessellationBinding.forVertexBuffer(instanceBuffer, new GlVertexAttributeBinding[] {
+                        new GlVertexAttributeBinding(10, 3, 0, false, 12, 0) // vec3, offset 0, stride 12 (3*4)
+                }).setInstanceDivisor(1),
+                TessellationBinding.forElementBuffer(this.sharedIndexBuffer.getBufferObject())
+        });
+    }
+
+    /**
+     * Ensures the instance buffer has enough capacity for the given number of instances.
+     * Grows exponentially to avoid frequent reallocations.
+     */
+    private void ensureInstanceBufferCapacity(CommandList commandList, int requiredInstances) {
+        if (requiredInstances <= instanceBufferCapacity) return;
+
+        int newCapacity = Math.max(instanceBufferCapacity * 2, MathUtil.ceilPowerOfTwo(requiredInstances));
+        if (newCapacity < 256) newCapacity = 256; // minimum
+
+        if (instanceBuffer != null) {
+            instanceBuffer.delete(commandList);
+        }
+
+        int stride = 12; // vec3 = 3 floats = 12 bytes
+        instanceStagingBuffer = commandList.createStagingBuffer(newCapacity * stride);
+        instanceBuffer = commandList.createBuffer(GL31C.GL_ARRAY_BUFFER, newCapacity * stride, 
+                GL31C.GL_DYNAMIC_DRAW, instanceStagingBuffer);
+        instanceBufferCapacity = newCapacity;
+
+        LOGGER.debug("[CrossSectionInstancing] Instance buffer grown to {} instances ({} KB)",
+                newCapacity, (newCapacity * stride) / 1024);
+    }
+
+    /**
+     * Uploads instance offsets to the instance buffer.
+     * @param offsets flat array of float[instanceCount * 3] (x, y, z per instance)
+     */
+    private void uploadInstanceOffsets(CommandList commandList, float[] offsets) {
+        if (instanceStagingBuffer == null) return;
+        
+        var mapped = instanceStagingBuffer.map();
+        mapped.asFloatBuffer().put(offsets);
+        instanceStagingBuffer.unmap();
+        
+        commandList.copyBuffer(instanceStagingBuffer, 0, instanceBuffer, 0, offsets.length * 4);
+    }
+
+    /**
+     * Executes an instanced draw call for cross-section instancing.
+     * Uses glDrawElementsInstanced with the shared index buffer.
+     */
+    private void executeInstancedDraw(CommandList commandList, GlTessellation tessellation, 
+                                       int indexCount, int baseVertex, int instanceCount) {
+        try (DrawCommandList drawCommandList = commandList.beginTessellating(tessellation)) {
+            // glDrawElementsInstanced(mode, count, type, indices, instancecount)
+            // We use baseVertex via the UBO or by binding the index buffer with offset
+            // For instanced draw with baseVertex, we need to use the multi-draw path or 
+            // ensure the index buffer covers the range
+            drawCommandList.drawElementsInstancedBaseVertex(
+                    GlPrimitiveType.TRIANGLES,
+                    indexCount,
+                    GlIndexType.UNSIGNED_INT,
+                    0, // index offset (bytes)
+                    instanceCount,
+                    baseVertex
+            );
+        }
     }
 
     private static void executeDrawBatch(CommandList commandList, GlTessellation tessellation, MultiDrawBatch batch) {

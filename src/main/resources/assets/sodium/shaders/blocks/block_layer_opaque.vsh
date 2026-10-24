@@ -10,6 +10,12 @@ layout(std140) uniform ChunkData {
     uvec4 subDrawOffsets[4096];
 };
 
+// ── Cross-Section Instancing ──────────────────────────────────────────────────
+// Instance offset (translation in blocks * 16) for rendering multiple identical
+// sub-chunks with a single draw call. Only active when cross-section instancing
+// is enabled (divisor = 1 on the instance buffer).
+layout(location = 10) in vec3 a_InstanceOffset;
+
 out vec4 v_Color;
 out vec2 v_TexCoord;
 
@@ -246,7 +252,9 @@ void main() {
 
     // Transform the chunk-local vertex position into world model space
     vec3 translation = u_RegionOffset + _get_draw_translation(_draw_id);
-    vec3 position = _vert_position + translation;
+    
+    // Cross-Section Instancing: add instance offset if enabled (a_InstanceOffset = 0 when not instancing)
+    vec3 position = _vert_position + translation + a_InstanceOffset;
 
 #ifdef USE_FOG
     v_FragDistance = getFragDistance(u_FogShape, position);
