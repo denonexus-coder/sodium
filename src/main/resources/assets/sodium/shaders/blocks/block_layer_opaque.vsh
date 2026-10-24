@@ -5,6 +5,11 @@
 #import <sodium:include/chunk_matrices.glsl>
 #import <sodium:include/chunk_material.glsl>
 
+// MobileGlues Ultra Drawer UBO (binding 3)
+layout(std140) uniform ChunkData {
+    uvec4 subDrawOffsets[4096];
+};
+
 out vec4 v_Color;
 out vec2 v_TexCoord;
 
