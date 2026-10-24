@@ -59,17 +59,18 @@ public final class ColoredLighting {
     public static final int SIZE_Z = 32;
 
     /**
-     * Master switch for the whole colored-light engine.
+     * Master switch for the normal colored-light engine (the "Sistema" control in the
+     * Experimental page).
      *
-     * <p>When this is false the engine never runs: the chunk shader is built without the
-     * {@code COLORED_LIGHTING} define, the grid and the analytic light list are never
-     * scanned, and the option group is hidden from the Experimental page.
+     * <p>It stays off: the MakeUp profile has its own colored-ground path
+     * ({@code MAKEUP_COLORED_LIGHTS}) with its own switch, so the profile does not need this
+     * engine and the player does not need a second, unrelated light model in the menu. Turning
+     * this on would expose the normal engine again, which is exactly what the profile path is
+     * meant to replace.
      *
-     * <p>It is now on, so the "Sistema" control in the Experimental page owns the switch:
-     * Desligado keeps the normal Sodium shader, GLSL/ESSL build the colored path. The default
-     * value of that option is OFF, so nothing changes for a player who never opens the page.
+     * <p>The code stays in the tree, so turning the feature back on is a one-word change.
      */
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false;
 
     private static final int CELLS = SIZE_X * SIZE_Y * SIZE_Z;
 
