@@ -116,10 +116,11 @@ public class ChunkShaderInterface {
             this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
         }
 
-        // MakeUp water and cloud textures (only for makeup profile)
+        // The chunk shader only samples the MakeUp water texture. The cloud texture belongs to
+        // the sky program, which binds it itself; binding it here threw "No uniform exists with
+        // name: u_MakeupCloudsTex" and the whole profile fell back to the normal chunk shader.
         if (options.makeupProfile()) {
             this.uniformTextures.put(ChunkShaderTextureSlot.MAKEUP_WATER, context.bindUniform("u_MakeupWaterTex", GlUniformInt::new));
-            this.uniformTextures.put(ChunkShaderTextureSlot.MAKEUP_CLOUDS, context.bindUniform("u_MakeupCloudsTex", GlUniformInt::new));
         }
 
         if (coloredLighting || options.makeupProfile()) {
@@ -210,9 +211,10 @@ public class ChunkShaderInterface {
         }
 
         // The MakeUp profile samples the same grid for the colour of the sources placed in the
-        // world. The normal engine is optional and stays off; the profile's sources are part of
-        // the profile, so they are always available while it is on.
-        if (!analyticLighting && (coloredLighting || options.makeupProfile())) {
+        // world, but only when its own colored-light switch is on: with it off the shader is
+        // compiled without MAKEUP_COLORED_LIGHTS, u_ColorLightTex does not exist, and binding it
+        // would abort the program just like the cloud sampler did.
+        if (!analyticLighting && (coloredLighting || (options.makeupProfile() && options.makeupColoredLights()))) {
             this.uniformColorLightTex = context.bindUniform("u_ColorLightTex", GlUniformInt::new);
             this.uniformColorLightOrigin = context.bindUniform("u_ColorLightOrigin", GlUniformFloat3v::new);
             this.uniformColorLightScale = context.bindUniform("u_ColorLightScale", GlUniformFloat3v::new);
@@ -246,11 +248,9 @@ public class ChunkShaderInterface {
         this.bindTexture(ChunkShaderTextureSlot.BLOCK, TextureUtil.getBlockTextureId());
         this.bindTexture(ChunkShaderTextureSlot.LIGHT, TextureUtil.getLightTextureId());
 
-        // MakeUp water and cloud textures
+        // MakeUp water texture (unit 3 is free: atlas 0, lightmap 1, colored-light 2)
         if (this.uniformMakeupOmniColor != null) {
-            // Unit 3 and 4 are free: block atlas is 0, lightmap is 1, colored-light is 2
             this.bindTexture(ChunkShaderTextureSlot.MAKEUP_WATER, TextureUtil.getMakeupWaterTextureId());
-            this.bindTexture(ChunkShaderTextureSlot.MAKEUP_CLOUDS, TextureUtil.getMakeupCloudsTextureId());
         }
 
         Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();

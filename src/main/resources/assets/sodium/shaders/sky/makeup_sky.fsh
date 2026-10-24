@@ -36,16 +36,20 @@ void main() {
     float h = clamp(dir.y, 0.0, 1.0);
     vec3 sky = mix(u_Horizon, u_Zenith, pow(h, 0.45));
 
+    // Declared before the cloud block: it used to live below it, which made the fragment shader
+    // fail with "'clear' : undeclared identifier" and the whole sky fell back to vanilla.
+    float clear = 1.0 - u_Rain;
+
     // Sample MakeUp clouds texture (R format, 512x512)
     // Use world-space direction for cloud UV, animate with time
     if (dir.y > 0.0) {
         vec2 cloudUv = dir.xz * 0.5 + vec2(u_Time * 0.001, u_Time * 0.0005);
-        float cloud = texture(u_MakeupCloudsTex, cloudUv).r;
-        
+        float cloud = textureLod(u_MakeupCloudsTex, cloudUv, 0.0).r;
+
         // Clouds fade near horizon and zenith
         float cloudFade = smoothstep(0.0, 0.15, h) * smoothstep(1.0, 0.85, h);
         float cloudStrength = cloud * cloudFade * 0.6 * clear;
-        
+
         // Cloud color: slightly brighter than sky, tinted by sun
         vec3 cloudColor = mix(u_Horizon, u_Zenith, 0.7) + u_SunColor * 0.3;
         sky = mix(sky, cloudColor, cloudStrength);
@@ -64,7 +68,6 @@ void main() {
     float moonDisc = smoothstep(0.9997, 0.9999, moonDot);
 
     // Rain hides the discs and most of the glow, but leaves the sky's rain tint untouched.
-    float clear = 1.0 - u_Rain;
     vec3 sun = u_SunColor * ((sunDisc * 3.0 + sunGlow * 0.5) * clear);
     vec3 moon = vec3(0.72, 0.78, 0.88) * (moonDisc * 0.9 * clear);
     sky += sun + moon;

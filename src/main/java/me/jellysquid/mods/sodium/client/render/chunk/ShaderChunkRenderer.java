@@ -165,8 +165,10 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                 && !pass.isReverseOrder()
                 && !pass.supportsFragmentDiscard();
         boolean makeupProfile = MakeupProfile.isEnabled();
+        boolean makeupColoredLights = makeupProfile
+                && SodiumClientMod.options().experimental.makeupColoredLights;
         ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType,
-                surfaceReflection, makeupProfile);
+                surfaceReflection, makeupProfile, makeupColoredLights);
 
         this.activeProgram = this.compileProgram(options);
         this.activeProgram.bind();

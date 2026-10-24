@@ -140,6 +140,29 @@ public final class MakeupSkyRenderer {
         return true;
     }
 
+    /**
+     * Loads a sky shader, retrying as ESSL when the driver rejects {@code #version 330 core}.
+     *
+     * <p>The chunk path already asks for ESSL when the colored engine runs on that path; the sky
+     * did not, so MobileGlues forwarded the raw 330 and the driver answered "version 330 not
+     * supported" (latest.log, 21:49:50). The retry keeps the desktop path untouched and makes the
+     * sky work on a GLES-only device.
+     */
+    private static GlShader loadShader(ShaderType type, Identifier id, ShaderConstants constants) {
+        try {
+            return ShaderLoader.loadShader(type, id, constants, false);
+        } catch (RuntimeException first) {
+            SodiumClientMod.logger().warn("MakeUp sky shader rejected as GLSL 330; retrying as ESSL", first);
+
+            try {
+                return ShaderLoader.loadShader(type, id, constants, true);
+            } catch (RuntimeException nested) {
+                nested.addSuppressed(first);
+                throw nested;
+            }
+        }
+    }
+
     private static void ensureProgram() {
         if (program != null || failed) {
             return;
@@ -148,9 +171,9 @@ public final class MakeupSkyRenderer {
         try {
             ShaderConstants constants = ShaderConstants.builder().build();
 
-            GlShader vertex = ShaderLoader.loadShader(ShaderType.VERTEX,
+            GlShader vertex = loadShader(ShaderType.VERTEX,
                     new Identifier("sodium", "sky/makeup_sky.vsh"), constants);
-            GlShader fragment = ShaderLoader.loadShader(ShaderType.FRAGMENT,
+            GlShader fragment = loadShader(ShaderType.FRAGMENT,
                     new Identifier("sodium", "sky/makeup_sky.fsh"), constants);
 
             try {

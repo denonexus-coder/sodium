@@ -2,6 +2,7 @@ package me.jellysquid.mods.sodium.client.render.chunk.lighting;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
+import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightEngine;
 import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions.LightingPath;
 import me.jellysquid.mods.sodium.client.render.MakeupProfile;
@@ -62,13 +63,13 @@ public final class ColoredLighting {
      *
      * <p>When this is false the engine never runs: the chunk shader is built without the
      * {@code COLORED_LIGHTING} define, the grid and the analytic light list are never
-     * scanned, and the option group is hidden from the Experimental page. The code stays
-     * in the tree, so turning the feature back on is a one-word change.
+     * scanned, and the option group is hidden from the Experimental page.
      *
-     * <p>It is a constant instead of an option so that a stale config file cannot switch the
-     * engine back on behind the user's back.
+     * <p>It is now on, so the "Sistema" control in the Experimental page owns the switch:
+     * Desligado keeps the normal Sodium shader, GLSL/ESSL build the colored path. The default
+     * value of that option is OFF, so nothing changes for a player who never opens the page.
      */
-    public static final boolean ENABLED = false;
+    public static final boolean ENABLED = true;
 
     private static final int CELLS = SIZE_X * SIZE_Y * SIZE_Z;
 
@@ -254,7 +255,10 @@ public final class ColoredLighting {
 
     // ---- Shared state ---------------------------------------------------------------------
 
-    private static int irisTimer;
+    /** How long a positive/negative Iris answer is reused; the profile asks every frame. */
+    private static final long IRIS_CHECK_INTERVAL_NANOS = 500_000_000L;
+
+    private static long irisCheckNanos;
     private static boolean irisPack;
     private static boolean shaderFailed;
     private static boolean analyticFailed;
@@ -302,12 +306,16 @@ public final class ColoredLighting {
      *
      * <p>This is not the normal colored-light engine: the profile keeps its own light model and
      * only borrows the colour of the sources, so a torch standing on the ground lights the
-     * ground around it exactly like the same torch lights it while it is in the hand. The normal
-     * engine stays off (see {@link #ENABLED}); this is not a user setting, it is part of the
-     * profile, so there is nothing to switch on.
+     * ground around it exactly like the same torch lights it while it is in the hand. The
+     * profile's own switch is {@code experimental.makeupColoredLights}; the normal engine is a
+     * separate option ("Sistema" in the Experimental page).
      */
     public static boolean isProfileActive() {
-        return MakeupProfile.isEnabled();
+        SodiumGameOptions options = SodiumClientMod.options();
+
+        return MakeupProfile.isEnabled()
+                && options != null
+                && options.experimental.makeupColoredLights;
     }
 
     public static int getMaxLights() {
@@ -343,16 +351,23 @@ public final class ColoredLighting {
     }
 
     /**
-     * Iris replaces Sodium's chunk shader while a pack is on. The reflection is done once per
-     * second at most, and only when Iris is actually installed.
+     * Iris replaces Sodium's chunk shader while a pack is on. The answer is cached for half a
+     * second: the profile asks on every frame and every chunk pass, and a reflective call per
+     * question would cost more than the effect it guards.
+     *
+     * <p>Installing Iris without selecting a pack leaves Sodium's render path untouched, so this
+     * is the check the profile uses; {@link #isIrisLoaded()} would disable it for a mod that is
+     * merely present.
      */
     public static boolean isIrisShaderPackInUse() {
         if (!isIrisLoaded()) {
             return false;
         }
 
-        if (--irisTimer <= 0) {
-            irisTimer = 20;
+        long now = System.nanoTime();
+
+        if (now - irisCheckNanos > IRIS_CHECK_INTERVAL_NANOS) {
+            irisCheckNanos = now;
             irisPack = queryIris();
         }
 

@@ -5,13 +5,13 @@ import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
-                                 boolean surfaceReflection, boolean makeupProfile) {
+                                 boolean surfaceReflection, boolean makeupProfile, boolean makeupColoredLights) {
     public ChunkShaderOptions withSurfaceReflection(boolean value) {
         if (this.surfaceReflection == value) {
             return this;
         }
 
-        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile);
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile, this.makeupColoredLights);
     }
 
     public ChunkShaderOptions withMakeupProfile(boolean value) {
@@ -19,7 +19,8 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             return this;
         }
 
-        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value);
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value,
+                value && this.makeupColoredLights);
     }
 
     public ShaderConstants constants() {
@@ -57,11 +58,12 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         if (this.makeupProfile) {
             constants.add("MAKEUP_NO_EFFECTS");
 
-            // The profile lights the ground with the colour of the sources that are placed in
-            // the world, exactly like the block it lights in the hand. The field comes from the
-            // same grid the normal engine uses, but the profile keeps its own warm curve, so
-            // none of the normal engine is compiled in.
-            constants.add("MAKEUP_COLORED_LIGHTS");
+            // The profile's ground light borrows the colour of the sources placed in the world.
+            // It is a switch of its own: with it off the shader compiles the warm candle curve
+            // only, and u_ColorLightTex is not declared, so the interface must not bind it.
+            if (this.makeupColoredLights) {
+                constants.add("MAKEUP_COLORED_LIGHTS");
+            }
         }
 
         return constants.build();

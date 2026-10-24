@@ -151,6 +151,13 @@ public class SodiumGameOptions {
         /** The profile's own sky gradient, sun, moon and stars (Overworld only). */
         public boolean makeupSky = true;
 
+        /**
+         * The profile's ground light takes the colour of the block that emits it (torch, soul
+         * torch, lava, portal, glowstone...), sampled from the Sodium colored-light grid. With it
+         * off the ground keeps the warm candle ramp of the profile.
+         */
+        public boolean makeupColoredLights = true;
+
         /** MakeUp-style distance fog using the horizon colour of the profile sky. */
         public boolean makeupFog = true;
 

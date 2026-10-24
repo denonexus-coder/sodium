@@ -945,18 +945,37 @@ public class SodiumGameOptionPages {
                         + "ligada, a luz de bloco usa as cores do Sodium; desligada, usa a paleta de vela do "
                         + "MakeUp. Não é um shaderpack: não há shadow map, framebuffer extra, depth texture "
                         + "nem cópia da cena.\n\n"
-                        + "Com o Iris instalado fica desligado, porque o Iris controla o shader do mundo. "
+                        + "Com um shaderpack do Iris ativo fica desligado, porque o Iris controla o shader "
+                        + "do mundo. Ter o Iris instalado sem pack ativo não impede o perfil. "
                         + "Ligar ou desligar recarrega o renderizador; os restantes controlos são uniforms "
-                        + "lidos por frame." + newIrisNote))
+                        + "lidos por frame."))
                 .setControl(TickBoxControl::new)
                 .setBinding((opts, value) -> opts.experimental.makeupNoEffects = value,
                         opts -> opts.experimental.makeupNoEffects)
                 .setImpact(OptionImpact.HIGH)
                 .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
-                .setEnabled(!irisInstalled)
+                .setEnabled(!irisPack)
                 .build();
 
-        BooleanSupplier profileOn = () -> !irisInstalled && profileNoEffects.getValue();
+        BooleanSupplier profileOn = () -> !irisPack && profileNoEffects.getValue();
+
+        Option<Boolean> profileColoredLights = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Luzes coloridas no chão"))
+                .setTooltip(Text.literal("O chão iluminado por uma tocha, lava, portal, glowstone ou lanterna recebe a cor "
+                        + "da fonte em vez da rampa quente única do lightmap. A intensidade continua a ser a curva "
+                        + "do perfil — CANDLE_BASELIGHT * (x*sqrt(x) + (1.17x)^6), com BLOCKLIGHT_TEMP 1 — e a cor "
+                        + "só entra onde a fonte realmente alcança: a coluna de luz de bloco vanilla é o gate, por "
+                        + "isso a cor não atravessa paredes nem acende cavernas escuras.\n\n"
+                        + "A cor vem da grelha do Sodium (32x16x32 à volta do jogador), a mesma que alimenta a luz "
+                        + "na mão. Não há passagem extra: é uma leitura de textura por vértice, já existente no "
+                        + "caminho do perfil. Desligado, o chão usa só a vela âmbar do MakeUp.\n\n"
+                        + "O que afeta: terreno e água opacos. Mudar recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.experimental.makeupColoredLights = value,
+                        opts -> opts.experimental.makeupColoredLights)
+                .setImpact(OptionImpact.MEDIUM)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
 
         Option<Boolean> profileSky = OptionImpl.createBuilder(boolean.class, sodiumOpts)
                 .setName(Text.literal("Céu do perfil"))
@@ -969,7 +988,7 @@ public class SodiumGameOptionPages {
                 .setBinding((opts, value) -> opts.experimental.makeupSky = value,
                         opts -> opts.experimental.makeupSky)
                 .setImpact(OptionImpact.LOW)
-                .setEnabled(!irisInstalled)
+                .setEnabled(!irisPack)
                 .build();
 
         Option<Boolean> profileFog = OptionImpl.createBuilder(boolean.class, sodiumOpts)
@@ -983,7 +1002,7 @@ public class SodiumGameOptionPages {
                 .setBinding((opts, value) -> opts.experimental.makeupFog = value,
                         opts -> opts.experimental.makeupFog)
                 .setImpact(OptionImpact.LOW)
-                .setEnabled(!irisInstalled)
+                .setEnabled(!irisPack)
                 .build();
 
         Option<Boolean> profileWater = OptionImpl.createBuilder(boolean.class, sodiumOpts)
@@ -999,7 +1018,7 @@ public class SodiumGameOptionPages {
                 .setBinding((opts, value) -> opts.experimental.makeupWater = value,
                         opts -> opts.experimental.makeupWater)
                 .setImpact(OptionImpact.LOW)
-                .setEnabled(!irisInstalled)
+                .setEnabled(!irisPack)
                 .build();
 
         BooleanSupplier waterOn = () -> profileOn.getAsBoolean() && profileWater.getValue();
@@ -1122,6 +1141,7 @@ public class SodiumGameOptionPages {
         groups.add(OptionGroup.createBuilder()
                 .setName(Text.literal("MakeUp No Effects"))
                 .add(profileNoEffects)
+                .add(new GatedOption<>(profileColoredLights, profileOn))
                 .add(new GatedOption<>(profileSky, profileOn))
                 .add(new GatedOption<>(profileFog, profileOn))
                 .add(new GatedOption<>(profileSunLight, profileOn))

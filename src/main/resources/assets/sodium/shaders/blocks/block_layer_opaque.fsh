@@ -110,10 +110,11 @@ void main() {
     diffuseColor.rgb *= light;
 
     if (water) {
-        // Sample MakeUp water texture for flow/wave data (RG format)
-        // Use world position for texture coordinates to animate with flow
+        // Sample MakeUp water texture for flow/wave data (RG format).
+        // textureLod: the lookup is inside a conditional, so an implicit-derivative texture()
+        // makes the driver warn (and can pick a different mip on a TBDR GPU).
         vec2 waterUv = (v_MakeupWorldPos.xz + u_MakeupTime * 0.05) * 0.25;
-        vec2 waterData = texture(u_MakeupWaterTex, waterUv).rg;
+        vec2 waterData = textureLod(u_MakeupWaterTex, waterUv, 0.0).rg;
         
         // Sodium has no depth texture or scene-colour copy here, so the absorption is an
         // angle-based approximation: the shallower the view, the less water the ray crosses.

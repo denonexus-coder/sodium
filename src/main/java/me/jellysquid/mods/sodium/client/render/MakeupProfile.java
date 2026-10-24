@@ -67,7 +67,7 @@ public final class MakeupProfile {
 
         return options != null
                 && options.experimental.makeupNoEffects
-                && !ColoredLighting.isIrisLoaded()
+                && !ColoredLighting.isIrisShaderPackInUse()
                 && isOverworld();
     }
 
