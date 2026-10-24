@@ -157,7 +157,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             if (storage == null) { FrameTrace.inc(FrameTrace.REGION_NO_STORAGE); continue; }
 
             final long tFill = FrameTrace.now();
-            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass,
+            fillCommandBuffer(commandList, this.batch, region, storage, renderList, camera, renderPass,
                               useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction, useCrossSectionInstancing);
             FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
@@ -230,7 +230,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             MultiDrawBatch regionBatch = batchPool.get(poolIdx);
 
             final long tFill = FrameTrace.now();
-            fillCommandBuffer(regionBatch, region, storage, renderList, camera, renderPass,
+            fillCommandBuffer(commandList, regionBatch, region, storage, renderList, camera, renderPass,
                               useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction, useCrossSectionInstancing);
             FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
@@ -280,16 +280,17 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         }
     }
 
-    private static void fillCommandBuffer(MultiDrawBatch batch,
-                                          RenderRegion renderRegion,
-                                          SectionRenderDataStorage renderDataStorage,
-                                          ChunkRenderList renderList,
-                                          CameraTransform camera,
-                                          TerrainRenderPass pass,
-                                          boolean useBlockFaceCulling,
-                                          boolean cullFaceEnabled,
-                                          boolean useInstancedFaceCompaction,
-                                          boolean useCrossSectionInstancing) {
+    private void fillCommandBuffer(CommandList commandList,
+                                           MultiDrawBatch batch,
+                                           RenderRegion renderRegion,
+                                           SectionRenderDataStorage renderDataStorage,
+                                           ChunkRenderList renderList,
+                                           CameraTransform camera,
+                                           TerrainRenderPass pass,
+                                           boolean useBlockFaceCulling,
+                                           boolean cullFaceEnabled,
+                                           boolean useInstancedFaceCompaction,
+                                           boolean useCrossSectionInstancing) {
         batch.clear();
 
         var iterator = renderList.sectionsWithGeometryIterator(pass.isReverseOrder());
@@ -368,36 +369,36 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                 }
             }
 
-            // Processa grupos de cross-section instancing
+            // Processa grupos de cross-section instancing - IMPLEMENTACAO REAL
             if (useCrossSectionInstancing && sectionsByHash != null && !sectionsByHash.isEmpty()) {
-                // Por enquanto, loga as oportunidades; implementacao completa requer shader/VAO instanciado
-                int totalInstancedSections = 0;
-                int totalGroups = 0;
                 for (var entry : sectionsByHash.entrySet()) {
+                    long geometryHash = entry.getKey();
                     List<SectionDrawData> group = entry.getValue();
+
                     if (group.size() > 1) {
-                        totalGroups++;
-                        totalInstancedSections += group.size();
-                        // Loga apenas no primeiro frame
-                        if (crossSectionFirstLog) {
-                            LOGGER.info("[Sodium] Cross-Section Instancing: hash={} tem {} secoes identicas (chunk offsets: {})",
-                                    Long.toHexString(entry.getKey()), group.size(),
-                                    group.stream().map(s -> "(" + s.chunkX + "," + s.chunkY + "," + s.chunkZ + ")")
-                                            .reduce((a, b) -> a + " " + b).orElse(""));
-                        }
-                        // Para grupos > 1, ainda usamos o caminho normal por enquanto
-                        // TODO: implementar draw instanciado real com template vertex buffer + instance buffer
-                        for (SectionDrawData data : group) {
-                            addDrawCommands(batch, data.pMeshData, data.slices);
-                        }
+                        // GRUPO COM MULTIPLAS SECOES IDENTICAS -> INSTANCED DRAW
+                        processInstancedGroup(commandList, geometryHash, group, renderRegion, pass);
                     } else {
                         // Grupo de tamanho 1: caminho normal
-                        addDrawCommands(batch, group.get(0).pMeshData, group.get(0).slices);
+                        SectionDrawData data = group.get(0);
+                        addDrawCommands(batch, data.pMeshData, data.slices);
                     }
                 }
-                if (totalGroups > 0 && crossSectionFirstLog) {
-                    LOGGER.info("[Sodium] Cross-Section Instancing ATIVO -- {} grupos, {} secoes candidatas a instancing",
-                            totalGroups, totalInstancedSections);
+
+                // Log apenas no primeiro frame (summary)
+                if (crossSectionFirstLog) {
+                    int totalGroups = 0;
+                    int totalInstancedSections = 0;
+                    for (var entry : sectionsByHash.entrySet()) {
+                        if (entry.getValue().size() > 1) {
+                            totalGroups++;
+                            totalInstancedSections += entry.getValue().size();
+                        }
+                    }
+                    if (totalGroups > 0) {
+                        LOGGER.info("[Sodium] Cross-Section Instancing ATIVO -- {} grupos, {} secoes renderizadas via glDrawElementsInstanced",
+                                totalGroups, totalInstancedSections);
+                    }
                     crossSectionFirstLog = false;
                 }
             }
@@ -418,6 +419,95 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, preMerge - batch.size);
     }
 
+    /**
+     * Processa um grupo de secoes com geometria identica via draw instanciado.
+     * Cria/usa template VAO, faz upload do instance buffer, e executa glDrawElementsInstanced.
+     */
+    private void processInstancedGroup(CommandList commandList, long geometryHash,
+                                        List<SectionDrawData> group, RenderRegion renderRegion,
+                                        TerrainRenderPass pass) {
+        // Pega ou cria o template instanciado para este geometryHash
+        InstancedTemplate template = templateCache.computeIfAbsent(geometryHash, h -> {
+            // Usa a primeira seção do grupo como template
+            SectionDrawData first = group.get(0);
+            var pMeshData = first.pMeshData;
+            
+            // Calcula indexCount e baseVertex do primeiro slice ativo
+            int indexCount = 0;
+            int baseVertex = 0;
+            boolean firstSlice = true;
+            
+            for (int facing = 0; facing < ModelQuadFacing.COUNT; facing++) {
+                long eCount = SectionRenderDataUnsafe.getElementCount(pMeshData, facing);
+                if (eCount > 0) {
+                    if (firstSlice) {
+                        baseVertex = (int) SectionRenderDataUnsafe.getVertexOffset(pMeshData, facing);
+                        firstSlice = false;
+                    }
+                    indexCount += (int) eCount;
+                }
+            }
+            
+            // Vertex buffer da região (compartilhado por todas as seções)
+            var resources = renderRegion.getResources();
+            GlBuffer vertexBuffer = resources.getVertexBuffer();
+            int vertexStride = this.vertexFormat.getVertexFormat().getStride();
+            
+            GlTessellation instancedTess = createInstancedTessellation(commandList, vertexBuffer, vertexStride);
+            
+            return new InstancedTemplate(vertexBuffer, 0, vertexStride, indexCount, instancedTess);
+        });
+
+        // Prepara offsets das instancias (posição de cada chunk section em coordenadas de bloco)
+        int instanceCount = group.size();
+        float[] instanceOffsets = new float[instanceCount * 3];
+        
+        for (int i = 0; i < instanceCount; i++) {
+            SectionDrawData data = group.get(i);
+            instanceOffsets[i * 3 + 0] = data.chunkX * 16.0f;
+            instanceOffsets[i * 3 + 1] = data.chunkY * 16.0f;
+            instanceOffsets[i * 3 + 2] = data.chunkZ * 16.0f;
+        }
+
+        // Garante capacidade do instance buffer
+        ensureInstanceBufferCapacity(commandList, instanceCount);
+        
+        // Upload dos offsets
+        uploadInstanceOffsets(commandList, instanceOffsets);
+        
+        // Calcula indexCount e baseVertex do template (usa primeira seção do grupo)
+        SectionDrawData first = group.get(0);
+        var pMeshData = first.pMeshData;
+        
+        int totalIndexCount = 0;
+        int baseVertex = 0;
+        boolean firstSlice = true;
+        
+        for (int facing = 0; facing < ModelQuadFacing.COUNT; facing++) {
+            long eCount = SectionRenderDataUnsafe.getElementCount(pMeshData, facing);
+            if (eCount > 0) {
+                if (firstSlice) {
+                    baseVertex = (int) SectionRenderDataUnsafe.getVertexOffset(pMeshData, facing);
+                    firstSlice = false;
+                }
+                totalIndexCount += (int) eCount;
+            }
+        }
+        
+        if (totalIndexCount == 0) return;
+        
+        // Log detalhado no primeiro frame
+        if (crossSectionFirstLog) {
+            LOGGER.info("[Sodium] Cross-Section Instancing DRAW: hash=0x{} instances={} indexCount={} baseVertex={}",
+                    Long.toHexString(geometryHash), instanceCount, totalIndexCount, baseVertex);
+        }
+        
+        // Executa draw instanciado
+        executeInstancedDraw(commandList, template.tessellation, totalIndexCount, baseVertex, instanceCount);
+        
+        FrameTrace.inc(FrameTrace.MULTIDRAW_CALLS);
+        FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, instanceCount - 1); // economizamos instanceCount-1 draws
+    }
     // Dados para draw de uma secao (usado no cross-section instancing)
     private static final class SectionDrawData {
         final int sectionIndex;
