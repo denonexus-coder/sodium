@@ -48,6 +48,10 @@ public class SodiumGameOptions {
         public boolean useFogOcclusion = true;
         public boolean useBlockFaceCulling = true;
         public boolean useNoErrorGLContext = true;
+
+        // MobileGlues Ultra Drawer & Instancing Settings
+        public boolean useInstancedFaceCompaction = true;
+        public boolean useMultiRegionCoalescing = true;
     }
 
     public static class AdvancedSettings {

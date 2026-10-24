@@ -433,6 +433,26 @@ public class SodiumGameOptionPages {
                         .build()
                 )
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Instanced Face Compaction"))
+                        .setTooltip(Text.literal("Compacta as faces das seções de chunks em um único sub-draw instanciado com máscara de direção.\n\n"
+                                + "Reduz o número de comandos enviados ao Ultra Drawer em mais de 70%, acelerando o processamento do terreno."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.performance.useInstancedFaceCompaction = value, opts -> opts.performance.useInstancedFaceCompaction)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_UPDATE)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Multi-Region Coalescing"))
+                        .setTooltip(Text.literal("Acumula as regiões de chunks visíveis em um Super-Lote Instanciado contínuo antes do despacho.\n\n"
+                                + "Elimina quebras repetidas de renderização por região, despachando toda a cena para a GPU com esforço mínimo de CPU."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.performance.useMultiRegionCoalescing = value, opts -> opts.performance.useMultiRegionCoalescing)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_UPDATE)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Oclusão por nevoeiro"))
                         .setTooltip(Text.literal("Se o nevoeiro estiver totalmente opaco, os chunks para lá do fim do nevoeiro não "
                                 + "chegam a ser submetidos. Se o nevoeiro for translúcido a opção não faz nada — é isso que "

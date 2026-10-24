@@ -85,7 +85,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             }
 
             final long tFill = FrameTrace.now();
-            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, cullFaceEnabled);
+            boolean useInstancedFaceCompaction = SodiumClientMod.options().performance.useInstancedFaceCompaction;
+            fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass, useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction);
             FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
             if (this.batch.isEmpty()) {
@@ -125,7 +126,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                           CameraTransform camera,
                                           TerrainRenderPass pass,
                                           boolean useBlockFaceCulling,
-                                          boolean cullFaceEnabled) {
+                                          boolean cullFaceEnabled,
+                                          boolean useInstancedFaceCompaction) {
         batch.clear();
 
         var iterator = renderList.sectionsWithGeometryIterator(pass.isReverseOrder());
@@ -161,7 +163,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
                     FrameTrace.add(FrameTrace.FACES_VISIBLE, Integer.bitCount(visible & geometryMask));
 
-                    if (cullFaceEnabled) {
+                    if (cullFaceEnabled || useInstancedFaceCompaction) {
                         // Merge-aware: one contiguous run per section, folded to one draw below.
                         slices = expandToGeometryRun(visible, geometryMask);
 
