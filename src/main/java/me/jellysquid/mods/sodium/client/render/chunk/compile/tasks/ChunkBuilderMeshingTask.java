@@ -137,13 +137,24 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
         Map<TerrainRenderPass, BuiltSectionMeshParts> meshes = new Reference2ReferenceOpenHashMap<>();
 
+        // ── Cross-Section Instancing: combine geometry hashes from all passes ─────
+        long combinedGeometryHash = 0L;
+
         for (TerrainRenderPass pass : DefaultTerrainRenderPasses.ALL) {
             BuiltSectionMeshParts mesh = buffers.createMesh(pass);
 
             if (mesh != null) {
                 meshes.put(pass, mesh);
                 renderData.addRenderPass(pass);
+
+                // Combina hashes de todos os passes não-vazios (XOR para ordem-independente)
+                combinedGeometryHash ^= mesh.getGeometryHash();
             }
+        }
+
+        // Se houver geometria, define o hash combinado no BuiltSectionInfo
+        if (combinedGeometryHash != 0L) {
+            renderData.setGeometryHash(combinedGeometryHash);
         }
 
         renderData.setOcclusionData(occluder.build());

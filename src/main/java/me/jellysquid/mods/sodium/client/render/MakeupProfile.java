@@ -12,29 +12,33 @@ import net.minecraft.util.math.MathHelper;
  * The palette and the toggles of the MakeUp "No Effects" profile.
  *
  * <p>MakeUp normally computes this in its shader pack. The values below are the exact values of
- * {@code profile.no_effects} for {@code COLOR_SCHEME=1}, {@code NIGHT_BRIGHT=0.60},
+ * {@code profile.no_effects} for {@code COLOR_SCHEME=0} ("Ethereal"), {@code NIGHT_BRIGHT=0.60},
  * {@code AVOID_DARK_LEVEL=0.030}, {@code BLOCKLIGHT_TEMP=1}, {@code WATER_ABSORPTION=0.10} and
  * {@code WATER_TURBULENCE=0.9}; the profil is reproduced inside Sodium's chunk shader so it costs
  * the same one pass as the normal terrain, instead of a full pack with shadow maps and composite
  * passes.
+ *
+ * <p>While the profile is active, no shadow that does not come from MakeUp itself is applied to
+ * the terrain: the Colorado Lighting shadow path (_colored_light) is not compiled for the
+ * profile, and the shadow uniforms are never bound.
  *
  * <p>The class only produces plain floats. The chunk interface uploads them once per pass and the
  * sky renderer uploads the same palette once per frame, so the terrain and the sky cannot drift
  * apart at sunset or during rain.
  */
 public final class MakeupProfile {
-    // COLOR_SCHEME 1 ("New shoka") from MakeUp's color_utils.glsl.
-    private static final float[] LIGHT_SUNSET = { 1.0F, 0.588F, 0.3555F };
+    // COLOR_SCHEME 0 ("Ethereal") from MakeUp's color_utils.glsl.
+    private static final float[] LIGHT_SUNSET = { 0.887528F, 0.443394F, 0.301044F };
     private static final float[] LIGHT_DAY = { 0.90F, 0.84F, 0.79F };
-    private static final float[] LIGHT_NIGHT = { 0.04786874F, 0.05175001F, 0.06112969F };
+    private static final float[] LIGHT_NIGHT = { 0.0317353F, 0.0467353F, 0.0637353F };
 
-    private static final float[] ZENITH_SUNSET = { 0.143F, 0.24394118F, 0.36450981F };
-    private static final float[] ZENITH_DAY = { 0.143F, 0.24394118F, 0.36450981F };
-    private static final float[] ZENITH_NIGHT = { 0.014F, 0.019F, 0.025F };
+    private static final float[] ZENITH_SUNSET = { 0.2617647F, 0.33529412F, 0.52352941F };
+    private static final float[] ZENITH_DAY = { 0.0785098F, 0.24352941F, 0.54901961F };
+    private static final float[] ZENITH_NIGHT = { 0.0168F, 0.0228F, 0.03F };
 
-    private static final float[] HORIZON_SUNSET = { 1.0F, 0.648F, 0.37824F };
+    private static final float[] HORIZON_SUNSET = { 1.0F, 0.6F, 0.394F };
     private static final float[] HORIZON_DAY = { 0.65F, 0.91F, 1.3F };
-    private static final float[] HORIZON_NIGHT = { 0.0213F, 0.0306F, 0.0387F };
+    private static final float[] HORIZON_NIGHT = { 0.02556F, 0.03772F, 0.05244F };
 
     private static final float[] WATER = { 0.05F, 0.1F, 0.11F };
 
@@ -120,8 +124,8 @@ public final class MakeupProfile {
         float[] horizon = dayBlend(HORIZON_SUNSET, HORIZON_DAY, horizonNight, dayMoment, dayMixer, nightMixer);
         horizon = mix(horizon, scale(HORIZON_SKY_RAIN, luma(horizon)), rain);
 
-        // OMNI_TINT is 0.25 for COLOR_SCHEME 1.
-        float[] omni = mix(zenith, scale(directColor, 0.45F), 0.25F);
+        // OMNI_TINT is 0.4 for COLOR_SCHEME 0 ("Ethereal").
+        float[] omni = mix(zenith, scale(directColor, 0.45F), 0.4F);
         float minCave = MathHelper.clamp(settings.makeupMinCaveLight / 1000.0F, 0.0F, 0.060F);
         float[] omniMin = scale(omni, minCave / Math.max(luma(omni), 1.0E-4F));
         omni = max(omni, omniMin);

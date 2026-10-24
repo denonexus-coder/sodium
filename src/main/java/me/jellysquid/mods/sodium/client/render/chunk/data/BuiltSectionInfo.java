@@ -29,11 +29,17 @@ public class BuiltSectionInfo {
     public final BlockEntity @Nullable[] culledBlockEntities;
     public final Sprite @Nullable[] animatedSprites;
 
+    // ── Cross-Section Instancing ──────────────────────────────────────────────
+    // Hash da geometria do vertex buffer desta seção (mesmo hash = geometria idêntica).
+    // 0 = não calculado / vazio.
+    public final long geometryHash;
+
     private BuiltSectionInfo(@NotNull Collection<TerrainRenderPass> blockRenderPasses,
                              @NotNull Collection<BlockEntity> globalBlockEntities,
                              @NotNull Collection<BlockEntity> culledBlockEntities,
                              @NotNull Collection<Sprite> animatedSprites,
-                             @NotNull ChunkOcclusionData occlusionData) {
+                             @NotNull ChunkOcclusionData occlusionData,
+                             long geometryHash) {
         this.globalBlockEntities = toArray(globalBlockEntities, BlockEntity[]::new);
         this.culledBlockEntities = toArray(culledBlockEntities, BlockEntity[]::new);
         this.animatedSprites = toArray(animatedSprites, Sprite[]::new);
@@ -55,6 +61,7 @@ public class BuiltSectionInfo {
         this.flags = flags;
 
         this.visibilityData = VisibilityEncoding.encode(occlusionData);
+        this.geometryHash = geometryHash;
     }
 
     public static class Builder {
@@ -93,8 +100,15 @@ public class BuiltSectionInfo {
             (cull ? this.culledBlockEntities : this.globalBlockEntities).add(entity);
         }
 
+        // ── Cross-Section Instancing ──────────────────────────────────────────────
+        private long geometryHash = 0L;
+
+        public void setGeometryHash(long hash) {
+            this.geometryHash = hash;
+        }
+
         public BuiltSectionInfo build() {
-            return new BuiltSectionInfo(this.blockRenderPasses, this.globalBlockEntities, this.culledBlockEntities, this.animatedSprites, this.occlusionData);
+            return new BuiltSectionInfo(this.blockRenderPasses, this.globalBlockEntities, this.culledBlockEntities, this.animatedSprites, this.occlusionData, this.geometryHash);
         }
     }
 

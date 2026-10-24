@@ -17,6 +17,7 @@ import me.jellysquid.mods.sodium.client.util.NativeBuffer;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.zip.CRC32;
 
 /**
  * A collection of temporary buffers for each worker thread which will be used to build chunk meshes for given render
@@ -91,7 +92,42 @@ public class ChunkBuildBuffers {
 
         mergedBufferBuilder.flip();
 
-        return new BuiltSectionMeshParts(mergedBuffer, vertexRanges);
+        // ── Cross-Section Instancing: compute geometry hash ─────────────────────
+        // Hash do conteúdo do vertex buffer para detectar seções com geometria idêntica.
+        long geometryHash = computeGeometryHash(mergedBuffer);
+
+        return new BuiltSectionMeshParts(mergedBuffer, vertexRanges, geometryHash);
+    }
+
+    /**
+     * Computa um hash CRC32 dos dados do vertex buffer.
+     * Seções com geometria idêntica terão o mesmo hash.
+     */
+    private static long computeGeometryHash(NativeBuffer buffer) {
+        var directBuffer = buffer.getDirectBuffer();
+        int position = directBuffer.position();
+        int limit = directBuffer.limit();
+        int length = limit - position;
+
+        if (length == 0) return 0L;
+
+        // CRC32 é rápido e tem boa distribuição para detecção de igualdade
+        CRC32 crc = new CRC32();
+        
+        // Processa em chunks para evitar alocação de array temporário grande
+        byte[] chunk = new byte[4096];
+        directBuffer.mark();
+        try {
+            while (directBuffer.remaining() > 0) {
+                int toRead = Math.min(chunk.length, directBuffer.remaining());
+                directBuffer.get(chunk, 0, toRead);
+                crc.update(chunk, 0, toRead);
+            }
+        } finally {
+            directBuffer.reset();
+        }
+
+        return crc.getValue();
     }
 
     public void destroy() {

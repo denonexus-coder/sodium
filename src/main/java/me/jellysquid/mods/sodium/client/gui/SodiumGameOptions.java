@@ -52,6 +52,7 @@ public class SodiumGameOptions {
         // MobileGlues Ultra Drawer & Instancing Settings
         public boolean useInstancedFaceCompaction = true;
         public boolean useMultiRegionCoalescing = true;
+        public boolean useCrossSectionInstancing = true;
     }
 
     public static class AdvancedSettings {

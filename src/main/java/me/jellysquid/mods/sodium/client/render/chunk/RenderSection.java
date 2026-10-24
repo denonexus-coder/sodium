@@ -48,6 +48,14 @@ public class RenderSection {
     private BlockEntity @Nullable[] culledBlockEntities;
     private Sprite @Nullable[] animatedSprites;
 
+    // ── Cross-Section Instancing ──────────────────────────────────────────────
+    // Hash da geometria (0 = não calculado / vazio)
+    private long geometryHash = 0L;
+
+    public long getGeometryHash() {
+        return this.geometryHash;
+    }
+
 
     // Pending Update State
     @Nullable
@@ -140,6 +148,7 @@ public class RenderSection {
         this.globalBlockEntities = info.globalBlockEntities;
         this.culledBlockEntities = info.culledBlockEntities;
         this.animatedSprites = info.animatedSprites;
+        this.geometryHash = info.geometryHash;
     }
 
     private void clearRenderState() {
@@ -149,6 +158,7 @@ public class RenderSection {
         this.globalBlockEntities = null;
         this.culledBlockEntities = null;
         this.animatedSprites = null;
+        this.geometryHash = 0L;
     }
 
     /**

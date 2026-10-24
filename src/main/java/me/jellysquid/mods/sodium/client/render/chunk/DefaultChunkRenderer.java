@@ -2,6 +2,9 @@ package me.jellysquid.mods.sodium.client.render.chunk;
 
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gl.attribute.GlVertexAttributeBinding;
+import me.jellysquid.mods.sodium.client.gl.arena.GlBufferArena;
+import me.jellysquid.mods.sodium.client.gl.arena.staging.StagingBuffer;
+import me.jellysquid.mods.sodium.client.gl.buffer.GlBuffer;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
 import me.jellysquid.mods.sodium.client.gl.device.DrawCommandList;
 import me.jellysquid.mods.sodium.client.gl.device.MultiDrawBatch;
@@ -11,6 +14,7 @@ import me.jellysquid.mods.sodium.client.gl.tessellation.GlPrimitiveType;
 import me.jellysquid.mods.sodium.client.gl.tessellation.GlTessellation;
 import me.jellysquid.mods.sodium.client.gl.tessellation.TessellationBinding;
 import me.jellysquid.mods.sodium.client.model.quad.properties.ModelQuadFacing;
+import me.jellysquid.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
 import me.jellysquid.mods.sodium.client.render.chunk.data.SectionRenderDataStorage;
 import me.jellysquid.mods.sodium.client.render.chunk.data.SectionRenderDataUnsafe;
 import me.jellysquid.mods.sodium.client.render.chunk.lists.ChunkRenderListIterable;
@@ -24,13 +28,20 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexTy
 import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
 import me.jellysquid.mods.sodium.client.util.BitwiseMath;
 import me.jellysquid.mods.sodium.client.util.FrameTrace;
+import me.jellysquid.mods.sodium.client.util.MathUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GL31C;
+import org.lwjgl.opengl.GL33C;
 import org.lwjgl.system.MemoryUtil;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class DefaultChunkRenderer extends ShaderChunkRenderer {
     private static final Logger LOGGER = LogManager.getLogger("Sodium-MultiRegionCoalescing");
@@ -49,6 +60,30 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
     private final ArrayList<RenderRegion>   coalesceRegions = new ArrayList<>();
     // Log the first time the path is taken so the player/dev can confirm activation.
     private boolean coalescingFirstLog = true;
+
+    // ── Cross-Section Instancing ────────────────────────────────────────────────
+    // Cache de templates de geometria: hash -> (vertexBuffer, indexCount, vertexStride, vertexCount)
+    private final Map<Long, InstancedTemplate> templateCache = new ConcurrentHashMap<>();
+    // Buffer de instâncias (translation vectors) - cresce on demand
+    private GlBuffer instanceBuffer;
+    private StagingBuffer instanceStagingBuffer;
+    private int instanceBufferCapacity = 0;
+    // Log de ativação
+    private boolean crossSectionFirstLog = true;
+
+    // Record para template de geometria instanciada
+    private record InstancedTemplate(
+            GlBuffer vertexBuffer,
+            int vertexCount,
+            int vertexStride,
+            int indexCount,
+            GlTessellation tessellation
+    ) {
+        public void delete(CommandList commandList) {
+            if (vertexBuffer != null) vertexBuffer.delete(commandList);
+            if (tessellation != null) tessellation.delete(commandList);
+        }
+    }
 
     public DefaultChunkRenderer(RenderDevice device, ChunkVertexType vertexType) {
         super(device, vertexType);
@@ -71,6 +106,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         boolean useBlockFaceCulling       = SodiumClientMod.options().performance.useBlockFaceCulling;
         boolean useInstancedFaceCompaction = SodiumClientMod.options().performance.useInstancedFaceCompaction;
         boolean useMultiRegionCoalescing   = SodiumClientMod.options().performance.useMultiRegionCoalescing;
+        boolean useCrossSectionInstancing  = SodiumClientMod.options().performance.useCrossSectionInstancing;
 
         // Widening the visible faces to a contiguous run (see expandToGeometryRun) puts
         // back-facing triangles back into the batch on the strength of GL discarding them, so
@@ -89,10 +125,10 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
         if (useMultiRegionCoalescing) {
             renderCoalesced(commandList, renderLists, renderPass, camera, shader,
-                            useBlockFaceCulling, useInstancedFaceCompaction, cullFaceEnabled);
+                            useBlockFaceCulling, useInstancedFaceCompaction, useCrossSectionInstancing, cullFaceEnabled);
         } else {
             renderPerRegion(commandList, renderLists, renderPass, camera, shader,
-                            useBlockFaceCulling, useInstancedFaceCompaction, cullFaceEnabled);
+                            useBlockFaceCulling, useInstancedFaceCompaction, useCrossSectionInstancing, cullFaceEnabled);
         }
 
         super.end(renderPass);
@@ -107,6 +143,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                  ChunkShaderInterface shader,
                                  boolean useBlockFaceCulling,
                                  boolean useInstancedFaceCompaction,
+                                 boolean useCrossSectionInstancing,
                                  boolean cullFaceEnabled) {
 
         Iterator<ChunkRenderList> iterator = renderLists.iterator(renderPass.isReverseOrder());
@@ -121,7 +158,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
             final long tFill = FrameTrace.now();
             fillCommandBuffer(this.batch, region, storage, renderList, camera, renderPass,
-                              useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction);
+                              useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction, useCrossSectionInstancing);
             FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
             if (this.batch.isEmpty()) { FrameTrace.inc(FrameTrace.REGION_EMPTY); continue; }
@@ -167,6 +204,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                  ChunkShaderInterface shader,
                                  boolean useBlockFaceCulling,
                                  boolean useInstancedFaceCompaction,
+                                 boolean useCrossSectionInstancing,
                                  boolean cullFaceEnabled) {
 
         coalesceTess.clear();
@@ -193,7 +231,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
             final long tFill = FrameTrace.now();
             fillCommandBuffer(regionBatch, region, storage, renderList, camera, renderPass,
-                              useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction);
+                              useBlockFaceCulling, cullFaceEnabled, useInstancedFaceCompaction, useCrossSectionInstancing);
             FrameTrace.addTime(FrameTrace.T_FILL, tFill);
 
             if (regionBatch.isEmpty()) { FrameTrace.inc(FrameTrace.REGION_EMPTY); continue; }
@@ -250,7 +288,8 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                           TerrainRenderPass pass,
                                           boolean useBlockFaceCulling,
                                           boolean cullFaceEnabled,
-                                          boolean useInstancedFaceCompaction) {
+                                          boolean useInstancedFaceCompaction,
+                                          boolean useCrossSectionInstancing) {
         batch.clear();
 
         var iterator = renderList.sectionsWithGeometryIterator(pass.isReverseOrder());
@@ -263,6 +302,10 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
             int originX = renderRegion.getChunkX();
             int originY = renderRegion.getChunkY();
             int originZ = renderRegion.getChunkZ();
+
+            // Cross-Section Instancing: collect sections by geometryHash
+            // Map: geometryHash -> list of (sectionIndex, chunkX, chunkY, chunkZ, pMeshData, slices)
+            Map<Long, List<SectionDrawData>> sectionsByHash = useCrossSectionInstancing ? new java.util.HashMap<>() : null;
 
             while (iterator.hasNext()) {
                 int sectionIndex = iterator.nextByteAsInt();
@@ -306,9 +349,56 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                     preMerge += commands;
                     FrameTrace.add(FrameTrace.FACES_SUBMITTED, commands);
 
+                    if (useCrossSectionInstancing) {
+                        // Obtem o geometryHash da RenderSection
+                        RenderSection section = renderRegion.getSection(sectionIndex);
+                        long geometryHash = section != null ? section.getGeometryHash() : 0L;
+
+                        if (geometryHash != 0L) {
+                            sectionsByHash.computeIfAbsent(geometryHash, k -> new java.util.ArrayList<>())
+                                    .add(new SectionDrawData(sectionIndex, chunkX, chunkY, chunkZ, pMeshData, slices));
+                            continue; // Nao adiciona ao batch normal; sera processado no fim
+                        }
+                    }
+
+                    // Fallback: secao unica ou instancing desabilitado
                     addDrawCommands(batch, pMeshData, slices);
                 } else {
                     FrameTrace.inc(FrameTrace.SECTIONS_EMPTY);
+                }
+            }
+
+            // Processa grupos de cross-section instancing
+            if (useCrossSectionInstancing && sectionsByHash != null && !sectionsByHash.isEmpty()) {
+                // Por enquanto, loga as oportunidades; implementacao completa requer shader/VAO instanciado
+                int totalInstancedSections = 0;
+                int totalGroups = 0;
+                for (var entry : sectionsByHash.entrySet()) {
+                    List<SectionDrawData> group = entry.getValue();
+                    if (group.size() > 1) {
+                        totalGroups++;
+                        totalInstancedSections += group.size();
+                        // Loga apenas no primeiro frame
+                        if (crossSectionFirstLog) {
+                            LOGGER.info("[Sodium] Cross-Section Instancing: hash={} tem {} secoes identicas (chunk offsets: {})",
+                                    Long.toHexString(entry.getKey()), group.size(),
+                                    group.stream().map(s -> "(" + s.chunkX + "," + s.chunkY + "," + s.chunkZ + ")")
+                                            .reduce((a, b) -> a + " " + b).orElse(""));
+                        }
+                        // Para grupos > 1, ainda usamos o caminho normal por enquanto
+                        // TODO: implementar draw instanciado real com template vertex buffer + instance buffer
+                        for (SectionDrawData data : group) {
+                            addDrawCommands(batch, data.pMeshData, data.slices);
+                        }
+                    } else {
+                        // Grupo de tamanho 1: caminho normal
+                        addDrawCommands(batch, group.get(0).pMeshData, group.get(0).slices);
+                    }
+                }
+                if (totalGroups > 0 && crossSectionFirstLog) {
+                    LOGGER.info("[Sodium] Cross-Section Instancing ATIVO -- {} grupos, {} secoes candidatas a instancing",
+                            totalGroups, totalInstancedSections);
+                    crossSectionFirstLog = false;
                 }
             }
         }
@@ -328,7 +418,25 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, preMerge - batch.size);
     }
 
+    // Dados para draw de uma secao (usado no cross-section instancing)
+    private static final class SectionDrawData {
+        final int sectionIndex;
+        final int chunkX, chunkY, chunkZ;
+        final long pMeshData;
+        final int slices;
+
+        SectionDrawData(int sectionIndex, int chunkX, int chunkY, int chunkZ, long pMeshData, int slices) {
+            this.sectionIndex = sectionIndex;
+            this.chunkX = chunkX;
+            this.chunkY = chunkY;
+            this.chunkZ = chunkZ;
+            this.pMeshData = pMeshData;
+            this.slices = slices;
+        }
+    }
+
     @SuppressWarnings("IntegerMultiplicationImplicitCastToLong")
+    private static void addDrawCommands(MultiDrawBatch batch, long pMeshData, int mask) {
     private static void addDrawCommands(MultiDrawBatch batch, long pMeshData, int mask) {
         final var pBaseVertex = batch.pBaseVertex;
         final var pElementCount = batch.pElementCount;

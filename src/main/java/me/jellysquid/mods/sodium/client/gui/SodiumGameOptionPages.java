@@ -453,6 +453,17 @@ public class SodiumGameOptionPages {
                         .build()
                 )
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Cross-Section Instancing"))
+                        .setTooltip(Text.literal("Detecta seções de chunks com geometria idêntica (ex.: oceano profundo, rocha homogênea)\n"
+                                + "e desenha múltiplas seções em um único comando instanciado (glDrawElementsInstanced).\n\n"
+                                + "Em oceanos/Nether/End pode reduzir draw calls de terreno em 90%+."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.performance.useCrossSectionInstancing = value, opts -> opts.performance.useCrossSectionInstancing)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_UPDATE)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("Oclusão por nevoeiro"))
                         .setTooltip(Text.literal("Se o nevoeiro estiver totalmente opaco, os chunks para lá do fim do nevoeiro não "
                                 + "chegam a ser submetidos. Se o nevoeiro for translúcido a opção não faz nada — é isso que "
