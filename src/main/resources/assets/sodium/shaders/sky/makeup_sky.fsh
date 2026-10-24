@@ -16,6 +16,9 @@ uniform float u_Rain;
 uniform float u_Night;
 uniform float u_Time;
 
+// MakeUp clouds texture (R format, 512x512)
+uniform sampler2D u_MakeupCloudsTex;
+
 float _hash(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
     p *= 17.0;
@@ -32,6 +35,21 @@ void main() {
 
     float h = clamp(dir.y, 0.0, 1.0);
     vec3 sky = mix(u_Horizon, u_Zenith, pow(h, 0.45));
+
+    // Sample MakeUp clouds texture (R format, 512x512)
+    // Use world-space direction for cloud UV, animate with time
+    if (dir.y > 0.0) {
+        vec2 cloudUv = dir.xz * 0.5 + vec2(u_Time * 0.001, u_Time * 0.0005);
+        float cloud = texture(u_MakeupCloudsTex, cloudUv).r;
+        
+        // Clouds fade near horizon and zenith
+        float cloudFade = smoothstep(0.0, 0.15, h) * smoothstep(1.0, 0.85, h);
+        float cloudStrength = cloud * cloudFade * 0.6 * clear;
+        
+        // Cloud color: slightly brighter than sky, tinted by sun
+        vec3 cloudColor = mix(u_Horizon, u_Zenith, 0.7) + u_SunColor * 0.3;
+        sky = mix(sky, cloudColor, cloudStrength);
+    }
 
     // Below the horizon the sky darkens instead of showing a second horizon through a missing
     // chunk. This is only visible for a frame while a section is being built.

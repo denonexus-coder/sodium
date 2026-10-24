@@ -11,6 +11,7 @@ import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
 import me.jellysquid.mods.sodium.client.render.MakeupProfile;
 import me.jellysquid.mods.sodium.client.render.chunk.shader.ShaderBindingContext;
+import me.jellysquid.mods.sodium.client.util.TextureUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.util.math.MatrixStack;
@@ -22,6 +23,7 @@ import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30C;
+import org.lwjgl.opengl.GL32C;
 
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
@@ -96,6 +98,12 @@ public final class MakeupSkyRenderer {
         uniforms.rain.setFloat(frame.rain());
         uniforms.night.setFloat(frame.night());
         uniforms.time.setFloat((world.getTime() + tickDelta) * 0.05F);
+        
+        // Bind clouds texture to unit 3
+        GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 3);
+        GlStateManager._bindTexture(TextureUtil.getMakeupCloudsTextureId());
+        uniforms.cloudsTex.setInt(3);
+        GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
 
         GL11C.glDrawArrays(GL11C.GL_TRIANGLES, 0, 3);
 
@@ -201,6 +209,8 @@ public final class MakeupSkyRenderer {
         private final GlUniformFloat night;
         private final GlUniformFloat time;
 
+        private final GlUniformInt cloudsTex;
+
         private Uniforms(ShaderBindingContext context) {
             this.inverseProjection = context.bindUniform("u_InvProjection", GlUniformMatrix4f::new);
             this.inverseView = context.bindUniform("u_InvView", GlUniformMatrix4f::new);
@@ -213,6 +223,8 @@ public final class MakeupSkyRenderer {
             this.rain = context.bindUniform("u_Rain", GlUniformFloat::new);
             this.night = context.bindUniform("u_Night", GlUniformFloat::new);
             this.time = context.bindUniform("u_Time", GlUniformFloat::new);
+
+            this.cloudsTex = context.bindUniform("u_MakeupCloudsTex", GlUniformInt::new);
         }
     }
 }

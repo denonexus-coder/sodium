@@ -116,6 +116,12 @@ public class ChunkShaderInterface {
             this.uniformTextures.put(ChunkShaderTextureSlot.LIGHT, context.bindUniform("u_LightTex", GlUniformInt::new));
         }
 
+        // MakeUp water and cloud textures (only for makeup profile)
+        if (options.makeupProfile()) {
+            this.uniformTextures.put(ChunkShaderTextureSlot.MAKEUP_WATER, context.bindUniform("u_MakeupWaterTex", GlUniformInt::new));
+            this.uniformTextures.put(ChunkShaderTextureSlot.MAKEUP_CLOUDS, context.bindUniform("u_MakeupCloudsTex", GlUniformInt::new));
+        }
+
         if (coloredLighting || options.makeupProfile()) {
             this.uniformHandLight = context.bindUniform("u_HandLight", GlUniformFloat4v::new);
             this.uniformHandLightColor = context.bindUniform("u_HandLightColor", GlUniformFloat3v::new);
@@ -239,6 +245,13 @@ public class ChunkShaderInterface {
     public void setupState() {
         this.bindTexture(ChunkShaderTextureSlot.BLOCK, TextureUtil.getBlockTextureId());
         this.bindTexture(ChunkShaderTextureSlot.LIGHT, TextureUtil.getLightTextureId());
+
+        // MakeUp water and cloud textures
+        if (this.uniformMakeupOmniColor != null) {
+            // Unit 3 and 4 are free: block atlas is 0, lightmap is 1, colored-light is 2
+            this.bindTexture(ChunkShaderTextureSlot.MAKEUP_WATER, TextureUtil.getMakeupWaterTextureId());
+            this.bindTexture(ChunkShaderTextureSlot.MAKEUP_CLOUDS, TextureUtil.getMakeupCloudsTextureId());
+        }
 
         Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
 

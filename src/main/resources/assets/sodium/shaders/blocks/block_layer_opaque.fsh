@@ -28,6 +28,9 @@ in float v_MaterialTranslucent;
 
 uniform vec4 u_HandLight;
 uniform vec3 u_HandLightColor;
+
+// MakeUp water texture (RG format, 256x256)
+uniform sampler2D u_MakeupWaterTex;
 #endif
 
 uniform sampler2D u_BlockTex; // The block texture
@@ -107,11 +110,19 @@ void main() {
     diffuseColor.rgb *= light;
 
     if (water) {
+        // Sample MakeUp water texture for flow/wave data (RG format)
+        // Use world position for texture coordinates to animate with flow
+        vec2 waterUv = (v_MakeupWorldPos.xz + u_MakeupTime * 0.05) * 0.25;
+        vec2 waterData = texture(u_MakeupWaterTex, waterUv).rg;
+        
         // Sodium has no depth texture or scene-colour copy here, so the absorption is an
         // angle-based approximation: the shallower the view, the less water the ray crosses.
         float ndv = max(dot(normal, viewDir), 0.0);
         float tint = clamp(u_MakeupWaterAbsorption * (1.0 - ndv) * 4.0, 0.0, 0.85);
-        diffuseColor.rgb = mix(diffuseColor.rgb, u_MakeupWaterColor, tint);
+        
+        // Mix water color with texture data (R = foam/flow, G = depth/caustics)
+        vec3 waterTextureColor = mix(u_MakeupWaterColor, vec3(waterData.r, waterData.g, 0.0), 0.5);
+        diffuseColor.rgb = mix(diffuseColor.rgb, waterTextureColor, tint);
     }
 
     if (translucent) {
