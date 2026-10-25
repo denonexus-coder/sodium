@@ -33,22 +33,22 @@ public class TextureUtil {
 
     /**
      * Returns the MakeUp water texture ID, loading it on first use.
-     * Texture: sodium:textures/makeup/water_256_RG_8bit.png
+     * Texture: sodium:textures/makeup/water_256_rg_8bit.png
      */
     public static int getMakeupWaterTextureId() {
         if (makeupWaterTextureId == -1) {
-            makeupWaterTextureId = loadMakeupTexture("water_256_RG_8bit");
+            makeupWaterTextureId = loadMakeupTexture("water_256_rg_8bit");
         }
         return makeupWaterTextureId;
     }
 
     /**
      * Returns the MakeUp clouds texture ID, loading it on first use.
-     * Texture: sodium:textures/makeup/clouds_natural_512_R_8bit.png
+     * Texture: sodium:textures/makeup/clouds_natural_512_r_8bit.png
      */
     public static int getMakeupCloudsTextureId() {
         if (makeupCloudsTextureId == -1) {
-            makeupCloudsTextureId = loadMakeupTexture("clouds_natural_512_R_8bit");
+            makeupCloudsTextureId = loadMakeupTexture("clouds_natural_512_r_8bit");
         }
         return makeupCloudsTextureId;
     }
