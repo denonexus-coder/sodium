@@ -6,6 +6,20 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexTy
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
                                  boolean surfaceReflection, boolean makeupProfile, boolean makeupColoredLights) {
+    /**
+     * Kept for binary compatibility with Iris.
+     *
+     * <p>Iris 1.7.6 builds this record from its own mixin with the five-argument constructor
+     * ({@code invokespecial ChunkShaderOptions.<init>(...ZZ)V} in IrisChunkProgramOverrides).
+     * Adding the sixth component changed the canonical constructor, so without this overload the
+     * game would fail with NoSuchMethodError as soon as a shader pack is active. Iris never reads
+     * the profile flags, so the colored grid is left out of that path.
+     */
+    public ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
+                              boolean surfaceReflection, boolean makeupProfile) {
+        this(fog, pass, vertexType, surfaceReflection, makeupProfile, false);
+    }
+
     public ChunkShaderOptions withSurfaceReflection(boolean value) {
         if (this.surfaceReflection == value) {
             return this;
