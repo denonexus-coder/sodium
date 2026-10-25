@@ -66,9 +66,29 @@ public final class MakeupProfile {
         SodiumGameOptions options = SodiumClientMod.options();
 
         return options != null
-                && options.experimental.makeupNoEffects
+                && mode() != SodiumGameOptions.MakeupMode.OFF
                 && !ColoredLighting.isIrisShaderPackInUse()
                 && isOverworld();
+    }
+
+    /** The profile selected in the menu, or {@code OFF} when there is no config yet. */
+    public static SodiumGameOptions.MakeupMode mode() {
+        SodiumGameOptions options = SodiumClientMod.options();
+
+        if (options == null || options.experimental.makeupMode == null) {
+            return SodiumGameOptions.MakeupMode.OFF;
+        }
+
+        return options.experimental.makeupMode;
+    }
+
+    /**
+     * Whether the block light is propagated with the Rethinking Voxels rules. The base palette,
+     * fog, water and sky are the same as No Effects; only the light transport and its palette
+     * change.
+     */
+    public static boolean isRethinking() {
+        return isEnabled() && mode() == SodiumGameOptions.MakeupMode.RETHINKING;
     }
 
     /** The sky and its fog are overworld features; the Nether and the End keep the vanilla sky. */

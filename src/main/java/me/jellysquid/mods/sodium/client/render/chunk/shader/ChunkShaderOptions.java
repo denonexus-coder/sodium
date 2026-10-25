@@ -5,7 +5,8 @@ import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
-                                 boolean surfaceReflection, boolean makeupProfile, boolean makeupColoredLights) {
+                                 boolean surfaceReflection, boolean makeupProfile, boolean makeupColoredLights,
+                                 boolean makeupRethinking) {
     /**
      * Kept for binary compatibility with Iris.
      *
@@ -17,7 +18,7 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
      */
     public ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
                               boolean surfaceReflection, boolean makeupProfile) {
-        this(fog, pass, vertexType, surfaceReflection, makeupProfile, false);
+        this(fog, pass, vertexType, surfaceReflection, makeupProfile, false, false);
     }
 
     public ChunkShaderOptions withSurfaceReflection(boolean value) {
@@ -25,7 +26,8 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             return this;
         }
 
-        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile, this.makeupColoredLights);
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile,
+                this.makeupColoredLights, this.makeupRethinking);
     }
 
     public ChunkShaderOptions withMakeupProfile(boolean value) {
@@ -34,7 +36,7 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         }
 
         return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value,
-                value && this.makeupColoredLights);
+                value && this.makeupColoredLights, value && this.makeupRethinking);
     }
 
     public ShaderConstants constants() {
@@ -75,8 +77,16 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             // The profile's ground light borrows the colour of the sources placed in the world.
             // It is a switch of its own: with it off the shader compiles the warm candle curve
             // only, and u_ColorLightTex is not declared, so the interface must not bind it.
-            if (this.makeupColoredLights) {
+            if (this.makeupColoredLights || this.makeupRethinking) {
                 constants.add("MAKEUP_COLORED_LIGHTS");
+            }
+
+            // The Rethinking mode keeps the same base palette and shader code; what changes is
+            // the content of the grid (per-face occlusion, translucent conduction) and the
+            // palette, both resolved on the CPU. The define is kept so the two modes can be
+            // told apart later without touching the transport.
+            if (this.makeupRethinking) {
+                constants.add("MAKEUP_RETHINKING");
             }
         }
 

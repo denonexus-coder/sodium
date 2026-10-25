@@ -926,38 +926,45 @@ public class SodiumGameOptionPages {
                 .add(new GatedOption<>(reflectionSoftness, reflectionDetails))
                 .build());
 
-        Option<Boolean> profileNoEffects = OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                .setName(Text.literal("Perfil MakeUp No Effects"))
-                .setTooltip(Text.literal("Reproduz o perfil No Effects do MakeUp dentro do shader de chunks do Sodium, sem "
-                        + "correr o shaderpack. Mantém o céu e a névoa próprios, a água com absorção 0.10 e "
-                        + "reflexo do céu, as ondas da água, o brilho nocturno 0.60, a luz mínima de caverna "
-                        + "0.030, a temperatura da luz de bloco 1, a luz na mão e as nuvens vanilla. O perfil "
-                        + "não inclui sombras, SSR, AO, AA, DoF, motion blur, bloom, aberração cromática, "
-                        + "godrays, movimento das folhas, nuvens volumétricas, reflexo das nuvens, brilho dos "
-                        + "materiais, refração nem brilho do sol/lua. As sombras coloridas continuam a ser "
-                        + "uma opção à parte, mas o modelo do perfil não tem sombras: com o perfil ligado, "
-                        + "essa opção não altera o terreno. O reflexo de superfície do Sodium, se estiver "
-                        + "ligado, continua a ser aplicado nas passagens opacas.\n\n"
-                        + "O que afeta: só o terreno, a água, o céu e a névoa. Entidades, mão e partículas "
-                        + "continuam com o sombreado vanilla/Sodium. No Nether e no End o perfil fica "
-                        + "desligado e o Sodium usa o caminho normal, com o céu e a névoa vanilla. Funciona "
-                        + "com a iluminação colorida ligada ou desligada: com ela "
-                        + "ligada, a luz de bloco usa as cores do Sodium; desligada, usa a paleta de vela do "
-                        + "MakeUp. Não é um shaderpack: não há shadow map, framebuffer extra, depth texture "
-                        + "nem cópia da cena.\n\n"
-                        + "Com um shaderpack do Iris ativo fica desligado, porque o Iris controla o shader "
-                        + "do mundo. Ter o Iris instalado sem pack ativo não impede o perfil. "
-                        + "Ligar ou desligar recarrega o renderizador; os restantes controlos são uniforms "
-                        + "lidos por frame."))
-                .setControl(TickBoxControl::new)
-                .setBinding((opts, value) -> opts.experimental.makeupNoEffects = value,
-                        opts -> opts.experimental.makeupNoEffects)
+        Option<SodiumGameOptions.MakeupMode> profileMode = OptionImpl.createBuilder(SodiumGameOptions.MakeupMode.class, sodiumOpts)
+                .setName(Text.literal("Perfil MakeUp"))
+                .setTooltip(Text.literal("Desligado deixa o Sodium normal. No Effects reproduz o perfil No Effects do "
+                        + "MakeUp dentro do shader de chunks do Sodium, sem correr o shaderpack: mantém o céu e "
+                        + "a névoa próprios, a água com absorção 0.10 e reflexo do céu, as ondas da água, o "
+                        + "brilho nocturno 0.60, a luz mínima de caverna 0.030, a temperatura da luz de bloco "
+                        + "1 e a luz na mão. Rethinking usa a mesma base, mas troca a luz de bloco pelas "
+                        + "regras do Rethinking Voxels: propagação com máscara de 6 faces por bloco (a luz "
+                        + "não atravessa slabs, escadas, alçapões nem paredes), condução colorida através de "
+                        + "vidro e água, e a paleta de cores do pack (tocha 1.0/0.7/0.45, alma 0.15/0.85/0.85, "
+                        + "lava 1.0/0.35/0.1, ametista 0.75/0.45/1.0, sculk 0.05/1.0/1.0).\n\n"
+                        + "Os três estados são exclusivos: nunca correm dois perfis ao mesmo tempo, e os dois "
+                        + "podem ficar desligados. O Rethinking não liga ray tracing, SSBO nem buffers "
+                        + "extra — a propagação é resolvida uma vez por reconstrução, na grelha que já "
+                        + "existe, e o shader continua a fazer uma leitura por vértice.\n\n"
+                        + "No Nether e no End o perfil fica desligado. Com um shaderpack do Iris ativo fica "
+                        + "desligado, porque o Iris controla o shader do mundo. Mudar de perfil recarrega o "
+                        + "renderizador; os restantes controlos são uniforms lidos por frame."))
+                .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.MakeupMode.class, new Text[] {
+                        Text.literal("Desligado"),
+                        Text.literal("No Effects"),
+                        Text.literal("Rethinking")
+                }))
+                .setBinding((opts, value) -> opts.experimental.makeupMode = value,
+                        opts -> opts.experimental.makeupMode == null
+                                ? SodiumGameOptions.MakeupMode.OFF
+                                : opts.experimental.makeupMode)
                 .setImpact(OptionImpact.HIGH)
                 .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
                 .setEnabled(!irisPack)
                 .build();
 
-        BooleanSupplier profileOn = () -> !irisPack && profileNoEffects.getValue();
+        BooleanSupplier profileOn = () -> !irisPack
+                && profileMode.getValue() != SodiumGameOptions.MakeupMode.OFF;
+
+        // In Rethinking the coloured propagation is the profile itself, so the switch has nothing
+        // to turn off and is hidden instead of being shown unchecked while the light is coloured.
+        BooleanSupplier coloredLightsOn = () -> !irisPack
+                && profileMode.getValue() == SodiumGameOptions.MakeupMode.NO_EFFECTS;
 
         Option<Boolean> profileColoredLights = OptionImpl.createBuilder(boolean.class, sodiumOpts)
                 .setName(Text.literal("Luzes coloridas no chão"))
@@ -1139,9 +1146,9 @@ public class SodiumGameOptionPages {
                 .build();
 
         groups.add(OptionGroup.createBuilder()
-                .setName(Text.literal("MakeUp No Effects"))
-                .add(profileNoEffects)
-                .add(new GatedOption<>(profileColoredLights, profileOn))
+                .setName(Text.literal("Perfil MakeUp"))
+                .add(profileMode)
+                .add(new GatedOption<>(profileColoredLights, coloredLightsOn))
                 .add(new GatedOption<>(profileSky, profileOn))
                 .add(new GatedOption<>(profileFog, profileOn))
                 .add(new GatedOption<>(profileSunLight, profileOn))

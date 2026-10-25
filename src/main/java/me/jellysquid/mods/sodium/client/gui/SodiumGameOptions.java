@@ -145,8 +145,18 @@ public class SodiumGameOptions {
          * The MakeUp "No Effects" profile, rebuilt inside the chunk shader instead of running the
          * shader pack. It is deliberately independent from the colored shadows and the surface
          * reflection: those keep their own switches and can be combined with this profile.
+         *
+         * @deprecated only read once, to migrate a config written before the profile selector
+         * ({@link #makeupMode}) existed. Never written back.
          */
+        @Deprecated
         public boolean makeupNoEffects = false;
+
+        /**
+         * Which profile the chunk shader builds. A single value, so "only one at a time, or both
+         * off" is guaranteed by construction instead of by two checkboxes that can disagree.
+         */
+        public MakeupMode makeupMode = MakeupMode.OFF;
 
         /** The profile's own sky gradient, sun, moon and stars (Overworld only). */
         public boolean makeupSky = true;
@@ -187,6 +197,19 @@ public class SodiumGameOptions {
 
         /** The profile's directional sun without a shadow map; the grass is lit by N·L. */
         public boolean makeupSunLight = true;
+    }
+
+    /** The two profiles the chunk shader can build; they are mutually exclusive. */
+    public enum MakeupMode {
+        /** Plain Sodium. */
+        OFF,
+        /** The MakeUp No Effects palette, fog, water and sky. */
+        NO_EFFECTS,
+        /**
+         * The same palette, but the block light is propagated with the Rethinking Voxels rules
+         * (per-face occlusion, translucent tinting) and uses its palette.
+         */
+        RETHINKING
     }
 
     public enum LightEngine {
@@ -250,6 +273,18 @@ public class SodiumGameOptions {
         } else {
             config = new SodiumGameOptions();
         }
+
+        // Migrate a config written before the profile selector existed. The old boolean is never
+        // written back, so the mode stays the only source of truth.
+        if (config.experimental.makeupMode == null) {
+            config.experimental.makeupMode = MakeupMode.OFF;
+        }
+
+        if (config.experimental.makeupMode == MakeupMode.OFF && config.experimental.makeupNoEffects) {
+            config.experimental.makeupMode = MakeupMode.NO_EFFECTS;
+        }
+
+        config.experimental.makeupNoEffects = false;
 
         // Hand the trace switches over as soon as the options are known, so the instrument is
         // already in the right state before the first frame is drawn.

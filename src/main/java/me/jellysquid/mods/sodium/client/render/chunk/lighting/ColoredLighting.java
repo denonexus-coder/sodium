@@ -16,8 +16,11 @@ import net.minecraft.client.world.ClientWorld;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.WorldChunk;
 import org.lwjgl.BufferUtils;
@@ -314,9 +317,14 @@ public final class ColoredLighting {
     public static boolean isProfileActive() {
         SodiumGameOptions options = SodiumClientMod.options();
 
-        return MakeupProfile.isEnabled()
-                && options != null
-                && options.experimental.makeupColoredLights;
+        if (!MakeupProfile.isEnabled() || options == null) {
+            return false;
+        }
+
+        // Rethinking always carries its own light model: the propagation is the profile, so it
+        // cannot be switched off without switching the profile off. No Effects keeps the switch
+        // it always had.
+        return MakeupProfile.isRethinking() || options.experimental.makeupColoredLights;
     }
 
     public static int getMaxLights() {
@@ -542,6 +550,11 @@ public final class ColoredLighting {
     // ---- Grid rebuild ---------------------------------------------------------------------
 
     private static void rebuildGrid(ClientWorld world, int centerX, int centerY, int centerZ) {
+        if (MakeupProfile.isRethinking()) {
+            rebuildRethinking(world, centerX, centerY, centerZ);
+            return;
+        }
+
         int ox = centerX - SIZE_X / 2;
         int oy = centerY - SIZE_Y / 2;
         int oz = centerZ - SIZE_Z / 2;
@@ -905,6 +918,511 @@ public final class ColoredLighting {
         GlStateManager._activeTexture(previousTexture);
     }
 
+
+    // ---- Rethinking Voxels profile --------------------------------------------------------
+    //
+    // The No Effects grid above is a separable squared-distance transform: fast, but it has no
+    // idea what stands between a source and a cell, so light goes through walls and a torch
+    // behind a slab lights the room. The Rethinking profile replaces only the transport, never
+    // the palette/fog/water of the base profile:
+    //
+    //  * every cell carries the six faces its outline shape leaves open (RV's `propagates()`);
+    //    a full cube is closed, a bottom slab is open on the sides and on top, a plant is open
+    //    everywhere. Light can only leave a face that is open and enter a face that is open.
+    //  * translucent cells (water, glass, ice, slime, honey) keep the face open but multiply the
+    //    colour that crosses them by RV's `colMult`, so a torch behind red glass paints the floor
+    //    red instead of white.
+    //  * emissive cells are always open, even when their shape is a full cube (glowstone, sea
+    //    lantern), exactly like RV's early `emissive` return.
+    //  * the wavefront carries the colour along the path and attenuates with the same 12-block
+    //    curve as the hand, so hand and floor agree on distance as well as on hue.
+    //
+    // It stays a CPU grid: no ray tracing, no SSBO, no extra framebuffer. One rebuild costs a
+    // scan of 16k cells plus one bounded flood per seed, and only runs when the player crosses an
+    // eight-block boundary or a block changes.
+
+    /** One bit per face: +X, -X, +Y, -Y, +Z, -Z. A full cube is 0, a plant is {@link #FULL_MASK}. */
+    private static final byte FULL_MASK = 0x3F;
+    private static final int[] FACE_DX = { 1, -1, 0, 0, 0, 0 };
+    private static final int[] FACE_DY = { 0, 0, 1, -1, 0, 0 };
+    private static final int[] FACE_DZ = { 0, 0, 0, 0, 1, -1 };
+    /** A lava lake is one emitter, not one per block; this bounds the seeds of a pathological scene. */
+    private static final int MAX_RETHINKING_SOURCES = 128;
+
+    private static final byte[] FACE_MASK = new byte[CELLS];
+    private static final float[] CELL_TINT = new float[CELLS * 3];
+    private static final float[] FLOOD_COLOR = new float[CELLS * 3];
+    private static final short[] FLOOD_DEPTH = new short[CELLS];
+    private static final byte[] FLOOD_SEEN = new byte[CELLS];
+    private static final int[] FLOOD_QUEUE = new int[CELLS];
+    private static final Block[] SOURCE_BLOCK = new Block[CELLS];
+
+    private static final Map<BlockState, Integer> SHAPE_CACHE = new HashMap<>();
+    private static final Map<BlockState, float[]> TINT_CACHE = new HashMap<>();
+    private static final Map<Block, float[]> TRANSLUCENT = new HashMap<>();
+
+    private static final float[] RV_NEUTRAL = { 1.0F, 1.0F, 1.0F };
+    private static final float[] RV_CANDLE = { 1.0F, 0.65F, 0.45F };
+
+    /** The palette of Rethinking Voxels ({@code lib/materials/lightColorSettings.glsl}). */
+    private static final Map<Block, float[]> RV_COLORS = new HashMap<>();
+
+    static {
+        float[] lava = col(1.0F, 0.35F, 0.1F);
+        float[] fire = col(1.0F, 0.55F, 0.1F);
+        float[] soulFire = col(0.15F, 0.85F, 0.85F);
+        float[] torch = col(1.0F, 0.7F, 0.45F);
+        float[] glowstone = col(1.0F, 0.75F, 0.55F);
+        float[] seaLantern = col(0.85F, 0.95F, 0.95F);
+        float[] magma = col(0.9F, 0.4F, 0.05F);
+        float[] crying = col(0.55F, 0.15F, 1.0F);
+        float[] endRod = col(1.0F, 0.9F, 0.85F);
+        float[] furnace = col(0.95F, 0.5F, 0.2F);
+        float[] soulTorch = col(0.15F, 0.85F, 0.85F);
+        float[] lichen = col(0.8F, 1.0F, 0.85F);
+        float[] table = col(0.8F, 0.4F, 0.1F);
+        float[] end = col(0.7F, 1.0F, 0.8F);
+        float[] dragon = col(0.5F, 0.05F, 0.6F);
+        float[] portal = col(0.55F, 0.15F, 1.0F);
+        float[] berry = col(0.75F, 0.4F, 0.1F);
+        float[] redstoneLamp = col(1.0F, 0.7F, 0.4F);
+        float[] shroomlight = col(1.0F, 0.5F, 0.2F);
+        float[] ochre = col(1.0F, 0.6F, 0.1F);
+        float[] verdant = col(0.65F, 1.0F, 0.15F);
+        float[] pearl = col(0.9F, 0.25F, 1.0F);
+        float[] sculk = col(0.05F, 1.0F, 1.0F);
+        float[] brewing = col(0.9F, 0.4F, 0.1F);
+        float[] beacon = col(0.35F, 1.0F, 0.95F);
+        float[] conduit = col(0.6F, 0.95F, 1.0F);
+        float[] pickle = col(0.65F, 1.0F, 1.0F);
+        float[] amethyst = col(0.75F, 0.45F, 1.0F);
+        float[] redstone = col(1.0F, 0.05F, 0.05F);
+        float[] pumpkin = col(0.95F, 0.6F, 0.3F);
+
+        RV_COLORS.put(Blocks.LAVA, lava);
+        RV_COLORS.put(Blocks.LAVA_CAULDRON, lava);
+        RV_COLORS.put(Blocks.FIRE, fire);
+        RV_COLORS.put(Blocks.SOUL_FIRE, soulFire);
+        RV_COLORS.put(Blocks.MAGMA_BLOCK, magma);
+        RV_COLORS.put(Blocks.TORCH, torch);
+        RV_COLORS.put(Blocks.WALL_TORCH, torch);
+        RV_COLORS.put(Blocks.LANTERN, torch);
+        RV_COLORS.put(Blocks.CAMPFIRE, fire);
+        RV_COLORS.put(Blocks.JACK_O_LANTERN, pumpkin);
+        RV_COLORS.put(Blocks.GLOWSTONE, glowstone);
+        RV_COLORS.put(Blocks.REDSTONE_LAMP, redstoneLamp);
+        RV_COLORS.put(Blocks.FURNACE, furnace);
+        RV_COLORS.put(Blocks.BLAST_FURNACE, furnace);
+        RV_COLORS.put(Blocks.SMOKER, furnace);
+        RV_COLORS.put(Blocks.BREWING_STAND, brewing);
+        RV_COLORS.put(Blocks.SEA_LANTERN, seaLantern);
+        RV_COLORS.put(Blocks.BEACON, beacon);
+        RV_COLORS.put(Blocks.END_ROD, endRod);
+        RV_COLORS.put(Blocks.LIGHT, col(1.0F, 1.0F, 1.0F));
+        RV_COLORS.put(Blocks.CONDUIT, conduit);
+        RV_COLORS.put(Blocks.END_PORTAL, end);
+        RV_COLORS.put(Blocks.END_GATEWAY, end);
+        RV_COLORS.put(Blocks.END_PORTAL_FRAME, end);
+        RV_COLORS.put(Blocks.ENDER_CHEST, dragon);
+        RV_COLORS.put(Blocks.SEA_PICKLE, pickle);
+        RV_COLORS.put(Blocks.NETHER_PORTAL, portal);
+        RV_COLORS.put(Blocks.CRYING_OBSIDIAN, crying);
+        RV_COLORS.put(Blocks.RESPAWN_ANCHOR, portal);
+        RV_COLORS.put(Blocks.DRAGON_EGG, dragon);
+        RV_COLORS.put(Blocks.SOUL_CAMPFIRE, soulFire);
+        RV_COLORS.put(Blocks.SOUL_TORCH, soulTorch);
+        RV_COLORS.put(Blocks.SOUL_WALL_TORCH, soulTorch);
+        RV_COLORS.put(Blocks.SOUL_LANTERN, soulTorch);
+        RV_COLORS.put(Blocks.SHROOMLIGHT, shroomlight);
+        RV_COLORS.put(Blocks.GLOW_LICHEN, lichen);
+        RV_COLORS.put(Blocks.CAVE_VINES, berry);
+        RV_COLORS.put(Blocks.CAVE_VINES_PLANT, berry);
+        RV_COLORS.put(Blocks.BROWN_MUSHROOM, col(1.0F, 1.0F, 1.0F));
+        RV_COLORS.put(Blocks.OCHRE_FROGLIGHT, ochre);
+        RV_COLORS.put(Blocks.VERDANT_FROGLIGHT, verdant);
+        RV_COLORS.put(Blocks.PEARLESCENT_FROGLIGHT, pearl);
+        RV_COLORS.put(Blocks.REDSTONE_TORCH, redstone);
+        RV_COLORS.put(Blocks.REDSTONE_WALL_TORCH, redstone);
+        RV_COLORS.put(Blocks.REDSTONE_ORE, redstone);
+        RV_COLORS.put(Blocks.DEEPSLATE_REDSTONE_ORE, redstone);
+        RV_COLORS.put(Blocks.SCULK_CATALYST, sculk);
+        RV_COLORS.put(Blocks.SCULK_SENSOR, sculk);
+        RV_COLORS.put(Blocks.CALIBRATED_SCULK_SENSOR, sculk);
+        RV_COLORS.put(Blocks.SCULK_SHRIEKER, sculk);
+        RV_COLORS.put(Blocks.AMETHYST_CLUSTER, amethyst);
+        RV_COLORS.put(Blocks.LARGE_AMETHYST_BUD, amethyst);
+        RV_COLORS.put(Blocks.MEDIUM_AMETHYST_BUD, amethyst);
+        RV_COLORS.put(Blocks.SMALL_AMETHYST_BUD, amethyst);
+        RV_COLORS.put(Blocks.ENCHANTING_TABLE, table);
+
+        // RV's `TRANSLUCENT_LIGHT_TINT 0.5`, `TRANSLUCENT_LIGHT_CONDUCTION 1.0`, with the dye as
+        // the texture colour. `colMult = clamp(1 - a + a * tint, 0, max(1, 1.02))`.
+        TRANSLUCENT.put(Blocks.GLASS, translucent(0xFFFFFF, 0.5F));
+        TRANSLUCENT.put(Blocks.GLASS_PANE, translucent(0xFFFFFF, 0.5F));
+        TRANSLUCENT.put(Blocks.TINTED_GLASS, translucent(0x1A1A1A, 0.9F));
+        TRANSLUCENT.put(Blocks.ICE, translucent(0x7DDAFF, 0.45F));
+        TRANSLUCENT.put(Blocks.PACKED_ICE, translucent(0x9CCBFF, 0.55F));
+        TRANSLUCENT.put(Blocks.BLUE_ICE, translucent(0x74A8FF, 0.65F));
+        TRANSLUCENT.put(Blocks.FROSTED_ICE, translucent(0x9FD8FF, 0.5F));
+        TRANSLUCENT.put(Blocks.SLIME_BLOCK, translucent(0x7EBF6B, 0.6F));
+        TRANSLUCENT.put(Blocks.HONEY_BLOCK, translucent(0xF2B03B, 0.65F));
+
+        Block[] stained = {
+                Blocks.WHITE_STAINED_GLASS, Blocks.ORANGE_STAINED_GLASS, Blocks.MAGENTA_STAINED_GLASS,
+                Blocks.LIGHT_BLUE_STAINED_GLASS, Blocks.YELLOW_STAINED_GLASS, Blocks.LIME_STAINED_GLASS,
+                Blocks.PINK_STAINED_GLASS, Blocks.GRAY_STAINED_GLASS, Blocks.LIGHT_GRAY_STAINED_GLASS,
+                Blocks.CYAN_STAINED_GLASS, Blocks.PURPLE_STAINED_GLASS, Blocks.BLUE_STAINED_GLASS,
+                Blocks.BROWN_STAINED_GLASS, Blocks.GREEN_STAINED_GLASS, Blocks.RED_STAINED_GLASS,
+                Blocks.BLACK_STAINED_GLASS
+        };
+        Block[] stainedPanes = {
+                Blocks.WHITE_STAINED_GLASS_PANE, Blocks.ORANGE_STAINED_GLASS_PANE,
+                Blocks.MAGENTA_STAINED_GLASS_PANE, Blocks.LIGHT_BLUE_STAINED_GLASS_PANE,
+                Blocks.YELLOW_STAINED_GLASS_PANE, Blocks.LIME_STAINED_GLASS_PANE,
+                Blocks.PINK_STAINED_GLASS_PANE, Blocks.GRAY_STAINED_GLASS_PANE,
+                Blocks.LIGHT_GRAY_STAINED_GLASS_PANE, Blocks.CYAN_STAINED_GLASS_PANE,
+                Blocks.PURPLE_STAINED_GLASS_PANE, Blocks.BLUE_STAINED_GLASS_PANE,
+                Blocks.BROWN_STAINED_GLASS_PANE, Blocks.GREEN_STAINED_GLASS_PANE,
+                Blocks.RED_STAINED_GLASS_PANE, Blocks.BLACK_STAINED_GLASS_PANE
+        };
+        int[] dyes = {
+                0xF9FFFE, 0xF9801D, 0xC74EBD, 0x3AB3DA, 0xFED83D, 0x80C71F, 0xF38BAA, 0x474F52,
+                0x9D9D97, 0x169C9C, 0x8932B8, 0x3C44AA, 0x835432, 0x5E7C16, 0xB02E26, 0x1D1D21
+        };
+
+        for (int i = 0; i < stained.length; i++) {
+            float[] tint = translucent(dyes[i], 0.55F);
+            TRANSLUCENT.put(stained[i], tint);
+            TRANSLUCENT.put(stainedPanes[i], tint);
+        }
+    }
+
+    private static float[] col(float r, float g, float b) {
+        return new float[] { r, g, b };
+    }
+
+    /**
+     * RV's translucent conduction: the light that crosses a cell is tinted by the cell and loses
+     * the energy its alpha absorbs. {@code alpha} is the texture alpha; the shape is 1:1 with the
+     * pack, only the source colour comes from the block instead of from colortex15.
+     */
+    private static float[] translucent(int hex, float alpha) {
+        float r = ((hex >> 16) & 0xFF) / 255.0F;
+        float g = ((hex >> 8) & 0xFF) / 255.0F;
+        float b = (hex & 0xFF) / 255.0F;
+
+        float a = (float) Math.sqrt(alpha);
+        float max = Math.max(r, Math.max(g, b));
+
+        if (max <= 0.0F) {
+            max = 1.0F;
+        }
+
+        r /= max;
+        g /= max;
+        b /= max;
+
+        float sum = Math.max(0.0001F, r + g + b);
+        float conduction = 0.5F + 1.0F / sum;
+
+        r *= conduction;
+        g *= conduction;
+        b *= conduction;
+
+        float cap = 1.02F;
+
+        return new float[] {
+                Math.min(cap, Math.max(0.0F, 1.0F - a + a * r)),
+                Math.min(cap, Math.max(0.0F, 1.0F - a + a * g)),
+                Math.min(cap, Math.max(0.0F, 1.0F - a + a * b))
+        };
+    }
+
+    private static final float[] WATER_TINT = translucent(0x3F76E4, 0.35F);
+
+    private static void rebuildRethinking(ClientWorld world, int centerX, int centerY, int centerZ) {
+        int ox = centerX - SIZE_X / 2;
+        int oy = centerY - SIZE_Y / 2;
+        int oz = centerZ - SIZE_Z / 2;
+
+        Arrays.fill(GRID, 0.0F);
+        Arrays.fill(FACE_MASK, (byte) 0);
+        Arrays.fill(CELL_TINT, 1.0F);
+        Arrays.fill(SOURCE_BLOCK, null);
+        sourceCount = 0;
+
+        int bottom = world.getBottomY();
+        int top = world.getTopY();
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+
+        for (int z = 0; z < SIZE_Z; z++) {
+            int worldZ = oz + z;
+
+            for (int y = 0; y < SIZE_Y; y++) {
+                int worldY = oy + y;
+
+                for (int x = 0; x < SIZE_X; x++) {
+                    int index = (z * SIZE_Y + y) * SIZE_X + x;
+
+                    if (worldY < bottom || worldY >= top) {
+                        FACE_MASK[index] = 0;
+                        continue;
+                    }
+
+                    pos.set(ox + x, worldY, worldZ);
+                    BlockState state = world.getBlockState(pos);
+                    int luminance = state.getLuminance();
+
+                    // RV checks `emissive` before `full`, so a glowstone or a sea lantern passes
+                    // light even though its shape is a full cube.
+                    if (luminance > 0) {
+                        FACE_MASK[index] = FULL_MASK;
+                        addRethinkingSource(world, pos, state, index, x, y, z, luminance);
+                        continue;
+                    }
+
+                    if (state.isAir()) {
+                        FACE_MASK[index] = FULL_MASK;
+                        continue;
+                    }
+
+                    float[] tint = tintFor(state);
+
+                    if (tint != null) {
+                        FACE_MASK[index] = FULL_MASK;
+                        CELL_TINT[index * 3] = tint[0];
+                        CELL_TINT[index * 3 + 1] = tint[1];
+                        CELL_TINT[index * 3 + 2] = tint[2];
+                        continue;
+                    }
+
+                    if (state.isOpaque()) {
+                        FACE_MASK[index] = 0;
+                        continue;
+                    }
+
+                    FACE_MASK[index] = (byte) shapeMask(world, pos, state);
+                }
+            }
+        }
+
+        propagateRethinking();
+
+        originX = ox;
+        originY = oy;
+        originZ = oz;
+
+        upload();
+    }
+
+    private static void addRethinkingSource(ClientWorld world, BlockPos pos, BlockState state, int index,
+                                            int x, int y, int z, int luminance) {
+        Block block = state.getBlock();
+
+        // A lava lake is thousands of emitting cells. Seeding only the first cell of each run of
+        // the same block keeps the flood at a few dozen seeds instead of one per lava block; the
+        // run is contiguous, so the field is unchanged.
+        if (isSameSource(index, x, y, z, block) || sourceCount >= MAX_RETHINKING_SOURCES) {
+            SOURCE_BLOCK[index] = block;
+            return;
+        }
+
+        float[] color = colorFor(block);
+        addSource(x, y, z, color, lightStrength(luminance), luminance);
+
+        SOURCE_BLOCK[index] = block;
+    }
+
+    private static boolean isSameSource(int index, int x, int y, int z, Block block) {
+        if (x > 0 && SOURCE_BLOCK[index - 1] == block) {
+            return true;
+        }
+
+        if (y > 0 && SOURCE_BLOCK[index - SIZE_X] == block) {
+            return true;
+        }
+
+        return z > 0 && SOURCE_BLOCK[index - SIZE_X * SIZE_Y] == block;
+    }
+
+    /**
+     * RV's {@code propagates()}: one bit per face that the outline shape leaves open. The shape is
+     * cached per state, because the scan asks the same few hundred states 16k times.
+     */
+    private static int shapeMask(ClientWorld world, BlockPos pos, BlockState state) {
+        Integer cached = SHAPE_CACHE.get(state);
+
+        if (cached != null) {
+            return cached;
+        }
+
+        VoxelShape shape = state.getOutlineShape(world, pos);
+        int mask;
+
+        if (shape.isEmpty()) {
+            mask = FULL_MASK;
+        } else {
+            mask = 0;
+
+            if (shape.getMax(Direction.Axis.X) < 0.999) {
+                mask |= 1 << 0;
+            }
+
+            if (shape.getMin(Direction.Axis.X) > 0.001) {
+                mask |= 1 << 1;
+            }
+
+            if (shape.getMax(Direction.Axis.Y) < 0.999) {
+                mask |= 1 << 2;
+            }
+
+            if (shape.getMin(Direction.Axis.Y) > 0.001) {
+                mask |= 1 << 3;
+            }
+
+            if (shape.getMax(Direction.Axis.Z) < 0.999) {
+                mask |= 1 << 4;
+            }
+
+            if (shape.getMin(Direction.Axis.Z) > 0.001) {
+                mask |= 1 << 5;
+            }
+        }
+
+        SHAPE_CACHE.put(state, mask);
+
+        return mask;
+    }
+
+    private static float[] tintFor(BlockState state) {
+        if (TINT_CACHE.containsKey(state)) {
+            return TINT_CACHE.get(state);
+        }
+
+        float[] tint = null;
+
+        if (!state.getFluidState().isEmpty()) {
+            if (state.getFluidState().isIn(FluidTags.WATER)) {
+                tint = WATER_TINT;
+            }
+        } else {
+            tint = TRANSLUCENT.get(state.getBlock());
+        }
+
+        TINT_CACHE.put(state, tint);
+
+        return tint;
+    }
+
+    /**
+     * Bounded wavefront per seed. The colour travels with the path, so a cell only receives what
+     * actually reaches it; the face mask on both sides of every step is what stops the light at a
+     * wall, and the tint of every cell is what colours it on the way through glass or water.
+     */
+    private static void propagateRethinking() {
+        for (int source = 0; source < sourceCount; source++) {
+            int base = source * 8;
+            int seed = ((int) sources[base + 2] * SIZE_Y + (int) sources[base + 1]) * SIZE_X
+                    + (int) sources[base];
+
+            Arrays.fill(FLOOD_SEEN, (byte) 0);
+
+            int head = 0;
+            int tail = 0;
+
+            FLOOD_QUEUE[tail++] = seed;
+            FLOOD_SEEN[seed] = 1;
+            FLOOD_DEPTH[seed] = 0;
+            FLOOD_COLOR[seed * 3] = sources[base + 3];
+            FLOOD_COLOR[seed * 3 + 1] = sources[base + 4];
+            FLOOD_COLOR[seed * 3 + 2] = sources[base + 5];
+
+            while (head < tail) {
+                int index = FLOOD_QUEUE[head++];
+                int cell = index * 3;
+
+                float red = FLOOD_COLOR[cell];
+                float green = FLOOD_COLOR[cell + 1];
+                float blue = FLOOD_COLOR[cell + 2];
+
+                if (red > GRID[cell]) {
+                    GRID[cell] = red;
+                }
+
+                if (green > GRID[cell + 1]) {
+                    GRID[cell + 1] = green;
+                }
+
+                if (blue > GRID[cell + 2]) {
+                    GRID[cell + 2] = blue;
+                }
+
+                int depth = FLOOD_DEPTH[index];
+
+                if (depth + 1 >= (int) LIGHT_RADIUS) {
+                    continue;
+                }
+
+                int mask = FACE_MASK[index] & 0xFF;
+
+                if (mask == 0) {
+                    continue;
+                }
+
+                int cellX = index % SIZE_X;
+                int cellY = (index / SIZE_X) % SIZE_Y;
+                int cellZ = index / (SIZE_X * SIZE_Y);
+                float ratio = attenuationRatio(depth, depth + 1);
+
+                for (int face = 0; face < 6; face++) {
+                    if ((mask & (1 << face)) == 0) {
+                        continue;
+                    }
+
+                    int nx = cellX + FACE_DX[face];
+                    int ny = cellY + FACE_DY[face];
+                    int nz = cellZ + FACE_DZ[face];
+
+                    if (nx < 0 || nx >= SIZE_X || ny < 0 || ny >= SIZE_Y || nz < 0 || nz >= SIZE_Z) {
+                        continue;
+                    }
+
+                    int next = (nz * SIZE_Y + ny) * SIZE_X + nx;
+
+                    if (FLOOD_SEEN[next] != 0) {
+                        continue;
+                    }
+
+                    int nextMask = FACE_MASK[next] & 0xFF;
+
+                    // Light leaves an open face and enters the opposite open face: a slab only
+                    // passes on the side it actually leaves free.
+                    if (nextMask == 0 || (nextMask & (1 << (face ^ 1))) == 0) {
+                        continue;
+                    }
+
+                    FLOOD_SEEN[next] = 1;
+                    FLOOD_DEPTH[next] = (short) (depth + 1);
+                    FLOOD_COLOR[next * 3] = red * CELL_TINT[next * 3] * ratio;
+                    FLOOD_COLOR[next * 3 + 1] = green * CELL_TINT[next * 3 + 1] * ratio;
+                    FLOOD_COLOR[next * 3 + 2] = blue * CELL_TINT[next * 3 + 2] * ratio;
+                    FLOOD_QUEUE[tail++] = next;
+                }
+            }
+        }
+    }
+
+    private static float attenuationRatio(int from, int to) {
+        float fromCurve = 1.0F - (from * from) / (LIGHT_RADIUS * LIGHT_RADIUS);
+        float toCurve = 1.0F - (to * to) / (LIGHT_RADIUS * LIGHT_RADIUS);
+
+        if (fromCurve <= 0.0001F) {
+            return 0.0F;
+        }
+
+        return (toCurve * toCurve) / (fromCurve * fromCurve);
+    }
+
     // ---- Shared helpers -------------------------------------------------------------------
 
     /**
@@ -925,10 +1443,13 @@ public final class ColoredLighting {
     }
 
     static float[] colorFor(Block block) {
-        float[] color = COLORS.get(block);
+        boolean rethinking = MakeupProfile.isRethinking();
+        float[] color = (rethinking ? RV_COLORS : COLORS).get(block);
 
         if (color == null) {
-            color = block instanceof AbstractCandleBlock ? CANDLE : NEUTRAL;
+            color = block instanceof AbstractCandleBlock
+                    ? (rethinking ? RV_CANDLE : CANDLE)
+                    : (rethinking ? RV_NEUTRAL : NEUTRAL);
         }
 
         return color;
