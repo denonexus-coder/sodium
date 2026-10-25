@@ -19,6 +19,7 @@ import net.minecraft.client.gl.Framebuffer;
 import net.minecraft.client.option.*;
 import net.minecraft.client.util.Window;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GLCapabilities;
 
@@ -945,9 +946,9 @@ public class SodiumGameOptionPages {
                         + "desligado, porque o Iris controla o shader do mundo. Mudar de perfil recarrega o "
                         + "renderizador; os restantes controlos são uniforms lidos por frame."))
                 .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.MakeupMode.class, new Text[] {
-                        Text.literal("Desligado"),
-                        Text.literal("No Effects"),
-                        Text.literal("Rethinking")
+                        Text.literal("Desligado").formatted(Formatting.GRAY),
+                        Text.literal("No Effects").formatted(Formatting.GOLD),
+                        Text.literal("Rethinking").formatted(Formatting.AQUA)
                 }))
                 .setBinding((opts, value) -> opts.experimental.makeupMode = value,
                         opts -> opts.experimental.makeupMode == null
@@ -1145,8 +1146,16 @@ public class SodiumGameOptionPages {
                 .setImpact(OptionImpact.LOW)
                 .build();
 
+        // The group header carries the profile colour, so the tab reads at a glance which model
+        // is running: amber for No Effects, aqua for Rethinking, plain white when both are off.
+        Text profileGroupName = switch (profileMode.getValue()) {
+            case NO_EFFECTS -> Text.literal("Perfil MakeUp").formatted(Formatting.GOLD);
+            case RETHINKING -> Text.literal("Perfil MakeUp").formatted(Formatting.AQUA);
+            default -> Text.literal("Perfil MakeUp");
+        };
+
         groups.add(OptionGroup.createBuilder()
-                .setName(Text.literal("Perfil MakeUp"))
+                .setName(profileGroupName)
                 .add(profileMode)
                 .add(new GatedOption<>(profileColoredLights, coloredLightsOn))
                 .add(new GatedOption<>(profileSky, profileOn))
