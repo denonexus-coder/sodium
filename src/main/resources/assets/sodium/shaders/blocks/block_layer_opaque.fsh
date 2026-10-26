@@ -58,6 +58,21 @@ uniform vec4 u_FogColor; // The color of the shader fog
 uniform float u_FogStart; // The starting position of the shader fog
 uniform float u_FogEnd; // The ending position of the shader fog
 
+// ── Motor B: six-axis occluded transport ─────────────────────────────────────
+// The atlas holds the colour that arrived on each face of each cell, six blocks stacked in V.
+// The fragment picks the block that matches the face it is drawing, so a wall that blocks the
+// source leaves the face behind it at zero -- the shading where there is no light -- while a
+// hole in the same wall lets the colour through and projects it onto the surface behind.
+#ifdef MOTOR_B
+in vec3 v_MotorBWorldPos;
+
+uniform sampler2D u_MotorBTex;
+uniform vec3 u_MotorBOrigin;
+uniform vec3 u_MotorBScale;
+uniform float u_MotorBStrength;
+uniform float u_MotorBCeiling;
+#endif
+
 out vec4 fragColor; // The output fragment for the color framebuffer
 
 #import <sodium:include/makeup.glsl>
@@ -83,6 +98,14 @@ void main() {
     vec3 motorViewDir = normalize(-v_MotorViewPos);
     vec3 motorNormal = normalize(cross(dFdx(v_MotorViewPos), dFdy(v_MotorViewPos)));
     motorNormal = faceforward(motorNormal, -motorViewDir, motorNormal);
+#endif
+
+#ifdef MOTOR_B
+    // Derived before the cutout discard for the same reason as the others: derivatives after a
+    // non-uniform discard are undefined, and the cutout pass is leaves and plants.
+    vec3 motorBWorldDir = normalize(-v_MotorBWorldPos);
+    vec3 motorBNormal = normalize(cross(dFdx(v_MotorBWorldPos), dFdy(v_MotorBWorldPos)));
+    motorBNormal = faceforward(motorBNormal, -motorBWorldDir, motorBNormal);
 #endif
 
 #ifdef USE_FRAGMENT_DISCARD
@@ -206,6 +229,55 @@ void main() {
         // angles while keeping the block texture underneath. With the option off, the shader is
         // not compiled at all and this branch does not exist.
         diffuseColor.rgb = mix(diffuseColor.rgb, v_SkyColor, amount * 0.45);
+    }
+#endif
+
+#ifdef MOTOR_B
+    {
+        vec3 motorBCell = (v_MotorBWorldPos - u_MotorBOrigin) * u_MotorBScale;
+
+        if (all(greaterThanEqual(motorBCell, vec3(0.0))) && all(lessThanEqual(motorBCell, vec3(1.0)))) {
+            vec3 motorBSize = vec3(1.0) / u_MotorBScale;
+            vec3 motorBAbs = abs(motorBNormal);
+
+            // The six blocks are +X, -X, +Y, -Y, +Z, -Z: the face the light arrives on.
+            float motorBLayer;
+            if (motorBAbs.x >= motorBAbs.y && motorBAbs.x >= motorBAbs.z) {
+                motorBLayer = motorBNormal.x >= 0.0 ? 0.0 : 1.0;
+            } else if (motorBAbs.y >= motorBAbs.z) {
+                motorBLayer = motorBNormal.y >= 0.0 ? 2.0 : 3.0;
+            } else {
+                motorBLayer = motorBNormal.z >= 0.0 ? 4.0 : 5.0;
+            }
+
+            // The atlas is one row per (z, y) and six stacked blocks, sampled at texel centres so
+            // the blocks cannot bleed into each other; the two z slices are interpolated the same
+            // way the colored grid does it.
+            vec3 motorBP = clamp(motorBCell, 0.0, 1.0) * motorBSize;
+            float motorBU = clamp(motorBP.x, 0.5, motorBSize.x - 0.5) / motorBSize.x;
+            float motorBY = clamp(motorBP.y, 0.5, motorBSize.y - 0.5);
+            float motorBZ0 = clamp(floor(motorBP.z - 0.5), 0.0, motorBSize.z - 1.0);
+            float motorBZ1 = min(motorBZ0 + 1.0, motorBSize.z - 1.0);
+            float motorBZf = clamp(motorBP.z - 0.5 - motorBZ0, 0.0, 1.0);
+            float motorBBase = motorBLayer * motorBSize.y * motorBSize.z;
+            float motorBRows = motorBSize.y * motorBSize.z * 6.0;
+            float motorBV0 = (motorBBase + motorBZ0 * motorBSize.y + motorBY) / motorBRows;
+            float motorBV1 = (motorBBase + motorBZ1 * motorBSize.y + motorBY) / motorBRows;
+
+            vec3 motorBArrived = mix(texture(u_MotorBTex, vec2(motorBU, motorBV0)).rgb,
+                                     texture(u_MotorBTex, vec2(motorBU, motorBV1)).rgb, motorBZf);
+
+            // Additive fusion: the colour that reached this face adds to the surface...
+            diffuseColor.rgb *= 1.0 + motorBArrived * (u_MotorBStrength * 1.15);
+
+            // ...and a face the light never reached stays at the darker end of the curve, which is
+            // the shadow behind a wall. The floor is not zero, so an unlit cave is dim, not black.
+            float motorBReach = clamp(max(motorBArrived.r, max(motorBArrived.g, motorBArrived.b))
+                    / max(u_MotorBCeiling, 0.05), 0.0, 1.0);
+            diffuseColor.rgb *= mix(1.0, 0.62 + 0.38 * motorBReach, u_MotorBStrength * 0.55);
+
+            diffuseColor.rgb = min(diffuseColor.rgb, vec3(1.30));
+        }
     }
 #endif
 

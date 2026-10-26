@@ -144,6 +144,12 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             }
         }
 
+        // Motor B carries its own atlas and its own uniforms, so it is defined independently of
+        // the single-pass Motor slots above: the switch in "Luz Avançada" is enough.
+        if (this.motor.motorB()) {
+            constants.add("MOTOR_B");
+        }
+
         return constants.build();
     }
 }

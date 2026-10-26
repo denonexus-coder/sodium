@@ -945,9 +945,10 @@ public class SodiumGameOptionPages {
      * tonemap drive other slots): those coexist (✔). Only the other colored-light engines are
      * replaced (⚠), last-wins.
      *
-     * <p>Fase 0 wires only the GUI and the config; the six-axis store, the additive fusion and the
-     * directional sampling stay behind {@code #ifdef} until the later phases. Nothing here has
-     * been compiled or run.
+     * <p>Fase 1 is real: the CPU builds a six-axis field with wall occlusion, the atlas is uploaded
+     * as one 2D texture and the fragment shader samples the face that the surface shows to the
+     * light. A wall blocks the step, an opening lets it through, and a face nothing reaches stays
+     * at the dark end of the curve — the shading where there is no light.
      */
     public static OptionPage advancedLight() {
         List<OptionGroup> groups = new ArrayList<>();
@@ -973,6 +974,9 @@ public class SodiumGameOptionPages {
                         + "é luz com direcção — uma parede iluminada por uma tocha fica mais escura na face oposta — e "
                         + "cor que se acumula onde duas lâmpadas se encontram, ao custo de seis vezes os dados da "
                         + "grelha.\n\n"
+                        + "O transporte é oclusivo: a luz passa por orifícios (uma janela, um corredor) e projeta-se no "
+                        + "que está atrás, mas uma parede sólida bloqueia o passo e a face que não recebe luz nenhuma "
+                        + "fica sombreada. Vidro tingido colore o que atravessa.\n\n"
                         + "Interruptor-mestre: com ele desligado, a luz colorida é a grelha GRID normal e nada nesta "
                         + "aba tem efeito. Ligado, o Motor B assume o transporte e o selector de motor da aba "
                         + "Experimental fica intacto mas adormecido (exclusão por construção).\n\n"
@@ -1058,9 +1062,10 @@ public class SodiumGameOptionPages {
 
         Option<Boolean> gridLod = OptionImpl.createBuilder(boolean.class, sodiumOpts)
                 .setName(Text.literal("Grelha com nível de detalhe"))
-                .setTooltip(Text.literal("Reduz a resolução da grelha com a distância para pagar o armazenamento por seis "
-                        + "eixos: fina perto, grosseira longe. Corta memória e custo de varrimento sem mudar o que se "
-                        + "vê perto do jogador. É conteúdo do varrimento; reconstrói a grelha no tick seguinte."))
+                .setTooltip(Text.literal("Afasta o corte do campo: a mais de dez blocos do jogador os níveis mais fracos "
+                        + "deixam de propagar, o que corta o custo do varrimento sem mudar o que se vê perto do "
+                        + "jogador. Perto, o campo mantém a resolução cheia. É conteúdo do varrimento; reconstrói a "
+                        + "grelha no tick seguinte."))
                 .setControl(TickBoxControl::new)
                 .setBinding((opts, value) -> {
                     opts.motorB.gridLod = value;

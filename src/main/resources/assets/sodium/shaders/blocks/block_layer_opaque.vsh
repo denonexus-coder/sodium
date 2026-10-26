@@ -43,6 +43,13 @@ out float v_MaterialWater;
 out float v_MaterialTranslucent;
 #endif
 
+// Motor B carries the camera-relative world position so the fragment stage can derive the face
+// normal and pick which of the six directions of the field this surface shows to the light.
+#ifdef MOTOR_B
+out vec3 v_MotorBWorldPos;
+uniform vec3 u_MotorBCamera;
+#endif
+
 // ── Motor single-pass engine ─────────────────────────────────────────────────
 // Every Motor varying lives under MOTOR_ENABLED, so with the engine off (none of the defines
 // present) not one extra out slot is emitted and the program matches the stock shader. The
@@ -279,6 +286,11 @@ void main() {
     
     // Cross-Section Instancing: add instance offset if enabled (a_InstanceOffset = 0 when not instancing)
     vec3 position = _vert_position + translation + a_InstanceOffset;
+
+#ifdef MOTOR_B
+    // Camera-relative world space, the same space the six-axis atlas is uploaded in.
+    v_MotorBWorldPos = position + u_MotorBCamera;
+#endif
 
 #ifdef USE_FOG
     v_FragDistance = getFragDistance(u_FogShape, position);

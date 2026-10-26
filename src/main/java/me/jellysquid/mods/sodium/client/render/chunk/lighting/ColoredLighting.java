@@ -341,6 +341,41 @@ public final class ColoredLighting {
     private static boolean gridDirty = true;
     private static int ticksSinceGridRebuild;
 
+    // ---- Motor B: six-axis occluded transport ---------------------------------------------
+    //
+    // The GRID engine stores one omnidirectional colour per cell, so a torch lights a wall the
+    // same way on both sides and a wall does not stop it: the distance transform has no notion of
+    // "which way the light came from". Motor B stores the colour that arrived on each of the six
+    // faces of the cell, and it only spreads into a neighbour that is not a wall. A hole in a wall
+    // therefore lets the light through and the block behind it is reached, while the solid part of
+    // the same wall leaves that face at zero -- that is the shading "where there is no light".
+
+    /** The six face directions stored per cell, in the order +X, -X, +Y, -Y, +Z, -Z. */
+    public static final int MOTOR_B_AXES = 6;
+
+    /** Rows per axis in the atlas: one row per (z, y), so the six axes stack vertically. */
+    private static final int MB_PLANE = SIZE_Y * SIZE_Z;
+    private static final int MB_ROWS = MB_PLANE * MOTOR_B_AXES;
+
+    /** 1 = light may enter the cell, 0 = wall (light stops on that face). */
+    private static final byte[] MB_SOLID = new byte[CELLS];
+
+    /** Per-cell transmission colour: white for air, the dye tint for stained glass and water. */
+    private static final float[] MB_TINT = new float[CELLS * 3];
+
+    /** Light level that arrived on each face; 0 means that face received nothing. */
+    private static final byte[] MB_LEVEL = new byte[CELLS * MOTOR_B_AXES];
+
+    /** Colour that arrived on each face, RGB 0..255. */
+    private static final byte[] MB_RGB = new byte[CELLS * MOTOR_B_AXES * 3];
+
+    private static int mbTextureId;
+    private static ByteBuffer mbUploadBuffer;
+    private static int mbOriginX, mbOriginY, mbOriginZ;
+    private static boolean mbBuilt;
+    private static boolean mbAdditiveFusion = true;
+    private static boolean mbGridLod = true;
+
     // ---- Shared state ---------------------------------------------------------------------
 
     /** How long a positive/negative Iris answer is reused; the profile asks every frame. */
@@ -350,6 +385,7 @@ public final class ColoredLighting {
     private static boolean irisPack;
     private static boolean shaderFailed;
     private static boolean analyticFailed;
+    private static boolean motorBFailed;
 
     private ColoredLighting() {
     }
@@ -398,8 +434,12 @@ public final class ColoredLighting {
      * <p>Null-safe: before the options are loaded this is false, i.e. the plain GRID path.
      */
     public static boolean useMotorB() {
-        var opts = SodiumClientMod.options();
-        return isActive() && opts != null && opts.motorB.enabled;
+        SodiumGameOptions opts = SodiumClientMod.options();
+
+        // Motor B is its own transport, not a variant of the Experimental engine: the master
+        // switch in "Luz Avançada" is enough, the GRID/ANALYTIC selector stays off and untouched.
+        return opts != null && opts.motorB.enabled && !shaderFailed && !motorBFailed
+                && !isIrisShaderPackInUse();
     }
 
     /**
@@ -439,10 +479,20 @@ public final class ColoredLighting {
         gridDirty = true;
     }
 
+    /**
+     * Called when the Motor B program failed to compile. Motor B is dropped for the session (the
+     * shader is rebuilt without it on the next pass) while the rest of the coloured lighting keeps
+     * working, so a bad driver loses the new engine instead of the whole effect.
+     */
+    public static void markMotorBFailed() {
+        motorBFailed = true;
+    }
+
     /** Lets the user retry after changing the path, without restarting the game. */
     public static void resetShaderFailure() {
         shaderFailed = false;
         analyticFailed = false;
+        motorBFailed = false;
         gridDirty = true;
     }
 
@@ -592,11 +642,12 @@ public final class ColoredLighting {
 
         // The profile needs the grid even when the normal engine is off: it is the field that
         // carries the colour of the sources placed in the world.
-        if ((!isActive() && !isProfileActive()) || client.world == null || client.player == null || client.isPaused()) {
+        if ((!isActive() && !isProfileActive() && !useMotorB())
+                || client.world == null || client.player == null || client.isPaused()) {
             return;
         }
 
-        if (isActive() && useAnalytic()) {
+        if (isActive() && useAnalytic() && !useMotorB()) {
             AnalyticLighting.tick(client);
         } else {
             tickGrid(client);
@@ -648,6 +699,14 @@ public final class ColoredLighting {
     // ---- Grid rebuild ---------------------------------------------------------------------
 
     private static void rebuildGrid(ClientWorld world, int centerX, int centerY, int centerZ) {
+        if (useMotorB()) {
+            // Motor B owns the transport when its switch is on; the GRID and the profile's
+            // Rethinking field stay untouched underneath so turning it off restores them on the
+            // next rebuild instead of leaving the world without light.
+            rebuildMotorB(world, centerX, centerY, centerZ);
+            return;
+        }
+
         if (MakeupProfile.isRethinking()) {
             rebuildRethinking(world, centerX, centerY, centerZ);
             return;
@@ -1241,6 +1300,331 @@ public final class ColoredLighting {
     }
 
     private static final float[] WATER_TINT = translucent(0x3F76E4, 0.35F);
+
+    // ---- Motor B: rebuild, flood and upload -----------------------------------------------
+
+    /**
+     * Builds the six-axis field for one anchor position.
+     *
+     * <p>The cell pass is the same one the profile's grid does (transmission tint, wall test,
+     * effective luminance), so a stained-glass window tints in Motor B exactly as it does in the
+     * Rethinking path. The propagation is a descending-level flood: a cell is claimed at the
+     * highest level that reaches it, and only the first claim spreads, which is what keeps it
+     * terminating. Two sources of the same level meeting on a face add their colour (that is the
+     * additive fusion), and a wall simply refuses the step, leaving the far face at zero.
+     */
+    private static void rebuildMotorB(ClientWorld world, int centerX, int centerY, int centerZ) {
+        int ox = centerX - SIZE_X / 2;
+        int oy = centerY - SIZE_Y / 2;
+        int oz = centerZ - SIZE_Z / 2;
+
+        SodiumGameOptions options = SodiumClientMod.options();
+        mbAdditiveFusion = options == null || options.motorB.additiveFusion;
+        mbGridLod = options == null || options.motorB.gridLod;
+
+        Arrays.fill(MB_SOLID, (byte) 0);
+        Arrays.fill(MB_LEVEL, (byte) 0);
+        Arrays.fill(MB_RGB, (byte) 0);
+        Arrays.fill(MB_TINT, 1.0F);
+
+        int bottom = world.getBottomY();
+        int top = world.getTopY();
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+
+        for (int z = 0; z < SIZE_Z; z++) {
+            int worldZ = oz + z;
+
+            for (int y = 0; y < SIZE_Y; y++) {
+                int worldY = oy + y;
+
+                for (int x = 0; x < SIZE_X; x++) {
+                    int cell = (z * SIZE_Y + y) * SIZE_X + x;
+
+                    if (worldY < bottom || worldY >= top) {
+                        MB_SOLID[cell] = 0;
+                        continue;
+                    }
+
+                    pos.set(ox + x, worldY, worldZ);
+                    BlockState state = world.getBlockState(pos);
+
+                    if (state.isOpaque()) {
+                        MB_SOLID[cell] = 0;
+                        continue;
+                    }
+
+                    MB_SOLID[cell] = 1;
+
+                    float[] tint = tintFor(state);
+
+                    if (tint != null) {
+                        MB_TINT[cell * 3] = tint[0];
+                        MB_TINT[cell * 3 + 1] = tint[1];
+                        MB_TINT[cell * 3 + 2] = tint[2];
+                    }
+
+                    int luminance = effectiveLuminance(state);
+
+                    if (luminance > 0) {
+                        seedMotorB(cell, colorFor(state.getBlock()), lightStrength(luminance), luminance);
+                    }
+                }
+            }
+        }
+
+        for (int level = 15; level >= 2; level--) {
+            for (int cell = 0; cell < CELLS; cell++) {
+                if (MB_SOLID[cell] == 0) {
+                    continue;
+                }
+
+                int base = cell * MOTOR_B_AXES;
+
+                for (int axis = 0; axis < MOTOR_B_AXES; axis++) {
+                    if (MB_LEVEL[base + axis] == (byte) level) {
+                        spreadMotorB(cell, base + axis, level);
+                    }
+                }
+            }
+        }
+
+        // additiveFusion is applied inside the flood (see mbAdditiveFusion): with it off only the
+        // first, brightest claim on a face is kept, which is the GRID rule.
+
+        if (options == null || options.motorB.directional) {
+            // Nothing to do: the six faces already carry their own colour.
+        } else {
+            // Flat mode: every face of a cell shows the same colour, so the surface is lit
+            // uniformly like GRID while still using the occluded transport. The brightest face
+            // wins, which keeps the hue of the source that reaches the cell.
+            for (int cell = 0; cell < CELLS; cell++) {
+                int base = cell * MOTOR_B_AXES;
+
+                int best = base;
+                int bestSum = -1;
+
+                for (int axis = 0; axis < MOTOR_B_AXES; axis++) {
+                    int slot = base + axis;
+                    int sum = (MB_RGB[slot * 3] & 0xFF) + (MB_RGB[slot * 3 + 1] & 0xFF)
+                            + (MB_RGB[slot * 3 + 2] & 0xFF);
+
+                    if (sum > bestSum) {
+                        bestSum = sum;
+                        best = slot;
+                    }
+                }
+
+                if (bestSum <= 0) {
+                    continue;
+                }
+
+                for (int axis = 0; axis < MOTOR_B_AXES; axis++) {
+                    int slot = base + axis;
+
+                    if (slot == best) {
+                        continue;
+                    }
+
+                    MB_RGB[slot * 3] = MB_RGB[best * 3];
+                    MB_RGB[slot * 3 + 1] = MB_RGB[best * 3 + 1];
+                    MB_RGB[slot * 3 + 2] = MB_RGB[best * 3 + 2];
+                }
+            }
+        }
+
+        mbOriginX = ox;
+        mbOriginY = oy;
+        mbOriginZ = oz;
+        mbBuilt = true;
+
+        uploadMotorB();
+    }
+
+    private static void seedMotorB(int cell, float[] color, float strength, int luminance) {
+        int base = cell * MOTOR_B_AXES;
+
+        for (int axis = 0; axis < MOTOR_B_AXES; axis++) {
+            MB_LEVEL[base + axis] = (byte) luminance;
+            putMotorBColor(base + axis, color[0] * strength, color[1] * strength, color[2] * strength);
+        }
+    }
+
+    /** Sends the light of one face into the six neighbours, stopping at walls. */
+    private static void spreadMotorB(int cell, int slot, int level) {
+        int x = cell % SIZE_X;
+        int t = cell / SIZE_X;
+        int y = t % SIZE_Y;
+        int z = t / SIZE_Y;
+
+        if (mbGridLod && level <= 4) {
+            // Far from the player the field is cut coarse: the weakest levels stop spreading more
+            // than ten blocks out, which is the LOD switch on this tab. Nothing changes near the
+            // player, so the cost of the flood drops without a visible seam.
+            int dx = x - SIZE_X / 2;
+            int dy = y - SIZE_Y / 2;
+            int dz = z - SIZE_Z / 2;
+
+            if (dx * dx + dy * dy + dz * dz > 100) {
+                return;
+            }
+        }
+
+        float r = (MB_RGB[slot * 3] & 0xFF) / 255.0F;
+        float g = (MB_RGB[slot * 3 + 1] & 0xFF) / 255.0F;
+        float b = (MB_RGB[slot * 3 + 2] & 0xFF) / 255.0F;
+
+        for (int dir = 0; dir < MOTOR_B_AXES; dir++) {
+            int nx = x;
+            int ny = y;
+            int nz = z;
+
+            switch (dir) {
+                case 0 -> nx++;
+                case 1 -> nx--;
+                case 2 -> ny++;
+                case 3 -> ny--;
+                case 4 -> nz++;
+                default -> nz--;
+            }
+
+            if (nx < 0 || nx >= SIZE_X || ny < 0 || ny >= SIZE_Y || nz < 0 || nz >= SIZE_Z) {
+                continue;
+            }
+
+            int neighbour = (nz * SIZE_Y + ny) * SIZE_X + nx;
+
+            if (MB_SOLID[neighbour] == 0) {
+                continue; // a wall: the light stops, the face on the far side stays dark
+            }
+
+            int received = neighbour * MOTOR_B_AXES + (dir ^ 1);
+            int next = level - 1;
+
+            if (next < 1) {
+                continue;
+            }
+
+            // The cell the light crosses tints it (stained glass, water, ice) and costs a little
+            // energy, so a window colours what is behind it instead of only what is in front.
+            float cr = r * MB_TINT[neighbour * 3] * 0.92F;
+            float cg = g * MB_TINT[neighbour * 3 + 1] * 0.92F;
+            float cb = b * MB_TINT[neighbour * 3 + 2] * 0.92F;
+
+            int stored = MB_LEVEL[received];
+
+            if (stored != 0) {
+                // Already claimed: only a source that arrives just as strongly is fused in, so the
+                // same light is not counted again every step of its own path. With additiveFusion
+                // off the first (brightest) claim wins, which is the GRID rule.
+                if (mbAdditiveFusion && stored >= next - 1) {
+                    addMotorBColor(received, cr, cg, cb);
+                }
+
+                continue;
+            }
+
+            MB_LEVEL[received] = (byte) next;
+            putMotorBColor(received, cr, cg, cb);
+        }
+    }
+
+    private static void putMotorBColor(int slot, float r, float g, float b) {
+        MB_RGB[slot * 3] = toByte(r);
+        MB_RGB[slot * 3 + 1] = toByte(g);
+        MB_RGB[slot * 3 + 2] = toByte(b);
+    }
+
+    private static void addMotorBColor(int slot, float r, float g, float b) {
+        int index = slot * 3;
+
+        MB_RGB[index] = toByte((MB_RGB[index] & 0xFF) / 255.0F + r);
+        MB_RGB[index + 1] = toByte((MB_RGB[index + 1] & 0xFF) / 255.0F + g);
+        MB_RGB[index + 2] = toByte((MB_RGB[index + 2] & 0xFF) / 255.0F + b);
+    }
+
+    private static byte toByte(float value) {
+        if (value <= 0.0F) {
+            return 0;
+        }
+
+        if (value >= 1.0F) {
+            return (byte) 255;
+        }
+
+        return (byte) (value * 255.0F);
+    }
+
+    private static void uploadMotorB() {
+        if (mbTextureId == 0) {
+            createMotorBTexture();
+        }
+
+        ByteBuffer buffer = mbUploadBuffer;
+        buffer.clear();
+        buffer.put(MB_RGB);
+        buffer.flip();
+
+        int previousTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 4);
+        GlStateManager._bindTexture(mbTextureId);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
+        GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, 0, 0, SIZE_X, MB_ROWS,
+                GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, buffer);
+        GlStateManager._activeTexture(previousTexture);
+    }
+
+    private static void createMotorBTexture() {
+        int previousTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        GlStateManager._activeTexture(GL32C.GL_TEXTURE0 + 4);
+
+        mbTextureId = GL11.glGenTextures();
+        mbUploadBuffer = BufferUtils.createByteBuffer(SIZE_X * MB_ROWS * 3);
+
+        GlStateManager._bindTexture(mbTextureId);
+        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGB8, SIZE_X, MB_ROWS, 0,
+                GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+
+        // Linear filtering smooths the field like the grid atlas does; the six axis blocks are
+        // sampled with clamped texel centres so they cannot bleed into each other.
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
+
+        GlStateManager._activeTexture(previousTexture);
+    }
+
+    public static int getMotorBTextureId() {
+        return mbTextureId;
+    }
+
+    public static boolean isMotorBBuilt() {
+        return mbBuilt;
+    }
+
+    public static float getMotorBOriginX() {
+        return mbOriginX;
+    }
+
+    public static float getMotorBOriginY() {
+        return mbOriginY;
+    }
+
+    public static float getMotorBOriginZ() {
+        return mbOriginZ;
+    }
+
+    public static float getMotorBScaleX() {
+        return 1.0F / SIZE_X;
+    }
+
+    public static float getMotorBScaleY() {
+        return 1.0F / SIZE_Y;
+    }
+
+    public static float getMotorBScaleZ() {
+        return 1.0F / SIZE_Z;
+    }
 
     private static void rebuildRethinking(ClientWorld world, int centerX, int centerY, int centerZ) {
         int ox = centerX - SIZE_X / 2;

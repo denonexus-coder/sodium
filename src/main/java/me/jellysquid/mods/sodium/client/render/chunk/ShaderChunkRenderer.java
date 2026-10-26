@@ -43,7 +43,10 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     }
 
     private GlProgram<ChunkShaderInterface> createShader(String path, ChunkShaderOptions options) {
-        boolean colored = ColoredLighting.isActive();
+        // Motor B owns the transport when its switch is on: the shader must not also sum the old
+        // grid or the analytic light list, or the same torch would be counted twice. The engine
+        // stays compiled out (ENABLED is false), but the guard keeps the two exclusive anyway.
+        boolean colored = ColoredLighting.isActive() && !options.motor().motorB();
         boolean analytic = colored && ColoredLighting.useAnalytic();
         int maxLights = analytic ? ColoredLighting.getMaxLights() : 0;
 
@@ -84,6 +87,22 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
             return createShader(path, attempt, colored, analytic, maxLights);
         } catch (RuntimeException first) {
             RuntimeException failure = first;
+
+            // Motor B is dropped before anything else: it is the newest path and it is fully
+            // optional, so a driver that rejects it keeps every other effect. The session keeps
+            // useMotorB() false from here on, so the next pass does not try it again.
+            if (attempt.motor().motorB()) {
+                SodiumClientMod.logger().error("Motor B shader failed to compile; retrying without the six-axis transport", failure);
+                ColoredLighting.markMotorBFailed();
+                attempt = attempt.withMotor(attempt.motor().withMotorB(false));
+
+                try {
+                    return createShader(path, attempt, colored, analytic, maxLights);
+                } catch (RuntimeException nested) {
+                    nested.addSuppressed(failure);
+                    failure = nested;
+                }
+            }
 
             // The Motor engine is the newest and most optional path, so it is dropped first: a
             // driver that chokes on one of the Motor bodies loses the Motor effects but keeps the
@@ -181,8 +200,9 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                 && !pass.isReverseOrder()
                 && !pass.supportsFragmentDiscard();
         boolean makeupProfile = MakeupProfile.isEnabled();
-        boolean makeupRethinking = makeupProfile && MakeupProfile.isRethinking();
-        boolean makeupColoredLights = makeupProfile
+        boolean motorB = ColoredLighting.useMotorB();
+        boolean makeupRethinking = makeupProfile && !motorB && MakeupProfile.isRethinking();
+        boolean makeupColoredLights = makeupProfile && !motorB
                 && (makeupRethinking || SodiumClientMod.options().experimental.makeupColoredLights);
 
         // The Motor engine is resolved per draw against the legacy options (last-wins). It is OFF

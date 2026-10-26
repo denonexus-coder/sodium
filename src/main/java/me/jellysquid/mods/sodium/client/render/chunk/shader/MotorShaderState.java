@@ -23,14 +23,20 @@ import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
  * that keys the program cache.
  */
 public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boolean tonemap,
-                               boolean grid, boolean gridLod, boolean shafts) {
+                               boolean grid, boolean gridLod, boolean shafts, boolean motorB) {
 
     /** Nothing lit: identical to the stock Sodium shader. */
-    public static final MotorShaderState OFF = new MotorShaderState(false, false, false, false, false, false, false);
+    public static final MotorShaderState OFF = new MotorShaderState(false, false, false, false, false, false, false, false);
 
     /** True when at least one Motor body is compiled in; gates the shared varyings. */
     public boolean any() {
         return this.shadow || this.sheen || this.fog || this.tonemap || this.grid || this.gridLod || this.shafts;
+    }
+
+    /** A copy with the Motor B transport switched off, used by the shader fallback ladder. */
+    public MotorShaderState withMotorB(boolean value) {
+        return new MotorShaderState(this.shadow, this.sheen, this.fog, this.tonemap,
+                this.grid, this.gridLod, this.shafts, value);
     }
 
     /**
@@ -49,8 +55,14 @@ public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boole
         }
 
         SodiumGameOptions.MotorSettings m = options.motor;
+
+        // Motor B is not one of the single-pass "slots": it is its own transport under the
+        // "Luz Avançada" switch, so it is resolved before the Motor master switch and survives
+        // when the rest of Motor is off.
+        boolean motorB = ColoredLighting.useMotorB();
+
         if (!m.enabled || ColoredLighting.isIrisLoaded()) {
-            return OFF;
+            return OFF.withMotorB(motorB);
         }
 
         boolean shadow = m.analyticShadow && MotorConflicts.motorOwns(MotorConflicts.Slot.SHADOW, legacyShadow(options));
@@ -61,7 +73,7 @@ public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boole
         boolean gridLod = grid && m.gridLod;
         boolean shafts = m.lightShafts;
 
-        return new MotorShaderState(shadow, sheen, fog, tonemap, grid, gridLod, shafts);
+        return new MotorShaderState(shadow, sheen, fog, tonemap, grid, gridLod, shafts, motorB);
     }
 
     // ---- what the legacy (Experimental / MakeUp profile) side currently wants, per slot ----
