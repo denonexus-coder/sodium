@@ -932,6 +932,155 @@ public class SodiumGameOptionPages {
         return new OptionPage(Text.literal("Motor"), ImmutableList.copyOf(groups));
     }
 
+    /**
+     * The "Luz Avançada" tab: the Motor B colored-light transport.
+     *
+     * <p>Motor B is a second light engine that stores the colour arriving along each of the six
+     * axes and fuses overlapping sources additively, so light gains direction and colours add up
+     * where lamps meet. It is mutually exclusive with the GRID / ANALYTIC engines of the
+     * Experimental tab: its master switch is the single flag the renderer reads, and while it is
+     * on it owns the transport and leaves the Experimental selector intact but dormant. It does
+     * NOT conflict with the MakeUp profile (that consumes its own {@code v_MakeupBlock} and only
+     * borrows the source colours) nor with the single-pass Motor effects (shadow, sheen, fog,
+     * tonemap drive other slots): those coexist (✔). Only the other colored-light engines are
+     * replaced (⚠), last-wins.
+     *
+     * <p>Fase 0 wires only the GUI and the config; the six-axis store, the additive fusion and the
+     * directional sampling stay behind {@code #ifdef} until the later phases. Nothing here has
+     * been compiled or run.
+     */
+    public static OptionPage advancedLight() {
+        List<OptionGroup> groups = new ArrayList<>();
+
+        BooleanSupplier motorBOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motorB.enabled;
+        };
+        BooleanSupplier directionalOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motorB.enabled && o.motorB.directional;
+        };
+        BooleanSupplier fusionOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motorB.enabled && o.motorB.additiveFusion;
+        };
+
+        Option<Boolean> enabled = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Motor B (luz colorida direcional)"))
+                .setTooltip(Text.literal("Liga o Motor B, um segundo motor de luz colorida. Em vez de guardar uma única "
+                        + "cor omnidireccional por célula (como a grelha GRID), o Motor B guarda a cor que chega por "
+                        + "cada um dos seis eixos (+X/-X, +Y/-Y, +Z/-Z) e soma as fontes que se sobrepõem. O resultado "
+                        + "é luz com direcção — uma parede iluminada por uma tocha fica mais escura na face oposta — e "
+                        + "cor que se acumula onde duas lâmpadas se encontram, ao custo de seis vezes os dados da "
+                        + "grelha.\n\n"
+                        + "Interruptor-mestre: com ele desligado, a luz colorida é a grelha GRID normal e nada nesta "
+                        + "aba tem efeito. Ligado, o Motor B assume o transporte e o selector de motor da aba "
+                        + "Experimental fica intacto mas adormecido (exclusão por construção).\n\n"
+                        + "Compatibilidade: ✔ coexiste com o perfil MakeUp (que usa a sua própria luz e só empresta a "
+                        + "cor das fontes) e ✔ com os efeitos do Motor de passe único (sombra, brilho, névoa, tonemap "
+                        + "ocupam outros lugares). ⚠ Substitui as grelhas GRID/ANALYTIC (são o mesmo lugar): o último a "
+                        + "ser ligado manda. Aplicar recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motorB.enabled = value;
+                    // Turning Motor B on/off changes which transport fills the grid: stamp it as
+                    // the most recent engine so the last-wins rule is explicit, and rebuild the
+                    // scan on the next tick so the change shows without a world reload.
+                    if (value) {
+                        opts.motorB.stampMotorB = ++opts.motorB.conflictClock;
+                    } else {
+                        opts.motorB.stampLegacyEngine = ++opts.motorB.conflictClock;
+                    }
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motorB.enabled)
+                .setImpact(OptionImpact.VARIES)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Luz Avançada").formatted(Formatting.LIGHT_PURPLE))
+                .add(enabled)
+                .build());
+
+        Option<Boolean> directional = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Luz direccional (6 eixos)"))
+                .setTooltip(Text.literal("Guarda a cor por eixo, para a luz ter direcção: a face virada à fonte recebe "
+                        + "mais cor que a face oposta, como no mundo real. Desligado, o Motor B continua a somar "
+                        + "aditivamente, mas ilumina todas as faces por igual — mais barato e mais plano.\n\n"
+                        + "É conteúdo do varrimento, não um programa novo: reconstrói a grelha no tick seguinte. "
+                        + "Aplicar recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motorB.directional = value;
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motorB.directional)
+                .setImpact(OptionImpact.MEDIUM)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Integer> directionalStrength = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Força da direcção"))
+                .setTooltip(Text.literal("Quanto a direcção por eixo modula cada face. A 0% a face escurecida é igual à "
+                        + "virada à fonte (plano, como a grelha GRID); a 100% o contraste entre faces é máximo. É um "
+                        + "uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.motorB.directionalStrength = value,
+                        opts -> opts.motorB.directionalStrength)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Boolean> additiveFusion = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Fusão aditiva"))
+                .setTooltip(Text.literal("Soma a cor das fontes que se sobrepõem, em vez de guardar só a mais forte (a "
+                        + "regra da grelha GRID). Duas lâmpadas coloridas na mesma célula misturam as cores; "
+                        + "desligado, a mais brilhante simplesmente ganha, como na GRID.\n\n"
+                        + "É conteúdo do varrimento: reconstrói a grelha no tick seguinte. Aplicar recarrega o "
+                        + "renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motorB.additiveFusion = value;
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motorB.additiveFusion)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Integer> fusionCeiling = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Tecto da fusão"))
+                .setTooltip(Text.literal("Limita a soma aditiva, em percentagem do branco total, para um amontoado de "
+                        + "lâmpadas saturar numa cor em vez de estourar para branco. A 100% não há limite. É um "
+                        + "uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.motorB.fusionCeiling = value,
+                        opts -> opts.motorB.fusionCeiling)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Boolean> gridLod = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Grelha com nível de detalhe"))
+                .setTooltip(Text.literal("Reduz a resolução da grelha com a distância para pagar o armazenamento por seis "
+                        + "eixos: fina perto, grosseira longe. Corta memória e custo de varrimento sem mudar o que se "
+                        + "vê perto do jogador. É conteúdo do varrimento; reconstrói a grelha no tick seguinte."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motorB.gridLod = value;
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motorB.gridLod)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Transporte"))
+                .add(new GatedOption<>(directional, motorBOn))
+                .add(new GatedOption<>(directionalStrength, directionalOn))
+                .add(new GatedOption<>(additiveFusion, motorBOn))
+                .add(new GatedOption<>(fusionCeiling, fusionOn))
+                .add(new GatedOption<>(gridLod, motorBOn))
+                .build());
+
+        return new OptionPage(Text.literal("Luz Avançada"), ImmutableList.copyOf(groups));
+    }
+
     public static OptionPage experimental() {
         List<OptionGroup> groups = new ArrayList<>();
         boolean irisPack = ColoredLighting.isIrisShaderPackInUse();

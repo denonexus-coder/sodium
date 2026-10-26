@@ -390,6 +390,19 @@ public final class ColoredLighting {
     }
 
     /**
+     * Whether the Motor B transport owns the colored light right now. Motor B is a separate,
+     * opt-in engine on the "Luz Avançada" tab; when its master switch is on it overrides the
+     * Experimental GRID/ANALYTIC selector for the session (mutual exclusion by a single switch),
+     * while leaving that selector's value intact so GRID returns unchanged when Motor B is off.
+     *
+     * <p>Null-safe: before the options are loaded this is false, i.e. the plain GRID path.
+     */
+    public static boolean useMotorB() {
+        var opts = SodiumClientMod.options();
+        return isActive() && opts != null && opts.motorB.enabled;
+    }
+
+    /**
      * Whether the MakeUp profile asks for the colour of the sources placed in the world.
      *
      * <p>This is not the normal colored-light engine: the profile keeps its own light model and

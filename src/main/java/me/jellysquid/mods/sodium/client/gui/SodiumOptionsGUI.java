@@ -50,6 +50,8 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private static final int ROW_HEIGHT = 20;
     private static final int SECTION_HEIGHT = 16;
     private static final int GROUP_GAP = 6;
+    /** Width of the collapsed description handle: a thin always-present strip, never a popup. */
+    private static final int DETAIL_STRIP_W = 14;
     private static final int[] PAGE_ACCENTS = {
             0xFF4FC3F7, 0xFF8AD97B, 0xFFFFC15E, 0xFFFF7BCB, 0xFFB7A4F5, 0xFF63D8D2, 0xFFFF8FA3, 0xFFFFB067
     };
@@ -60,6 +62,12 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     private int railWidth;
     private int contentX, contentY, contentW, contentH;
     private boolean detailVisible;
+    // The description pane is now docked and toggled by the user (Ctrl+X opens, Ctrl+O closes),
+    // not sized automatically by the window width. detailInit remembers that the one-time default
+    // (open on a wide screen, closed on a narrow one) has already been applied, after which the
+    // user's choice sticks for the rest of the session.
+    private boolean detailExpanded;
+    private boolean detailInit;
     private int detailX, detailY, detailW, detailH;
     private int contentScroll, contentMaxScroll;
     private int detailScroll, detailMaxScroll;
@@ -104,6 +112,7 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.pages.add(SodiumGameOptionPages.visual());
         this.pages.add(SodiumGameOptionPages.experimental());
         this.pages.add(SodiumGameOptionPages.motor());
+        this.pages.add(SodiumGameOptionPages.advancedLight());
         this.pages.add(SodiumGameOptionPages.performance());
         this.pages.add(SodiumGameOptionPages.advanced());
 
@@ -258,21 +267,39 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         // there is still room for the option list beside it.
         boolean shortScreen = this.height < 240 && this.width >= 320;
         this.railWidth = shortScreen ? 150 : (compact ? 88 : 92);
-        this.detailVisible = this.width >= 600;
+
+        // One-time default for the docked pane: open on a wide screen, closed on a narrow one.
+        // After this the user drives it with Ctrl+X / Ctrl+O and the window width no longer
+        // forces it open or shut.
+        if (!this.detailInit) {
+            this.detailExpanded = this.width >= 600;
+            this.detailInit = true;
+        }
+
+        // Below this width there is simply no room for a full pane beside the list, so the strip
+        // is forced even when the user asked for the pane. The handle still shows how to reopen it
+        // once there is room again.
+        boolean canExpand = this.width >= 480;
+        this.detailVisible = this.detailExpanded && canExpand;
 
         this.contentX = this.railWidth + 8;
         this.contentY = 32;
 
-        int contentRight = this.width - 8;
+        // The pane (expanded) and the handle (collapsed) are both docked against the right edge and
+        // both reserve their column from the content rectangle. Nothing floats, so no row, tooltip
+        // or scrollbar can ever be drawn over the list, the footer or off the screen.
+        this.detailY = 30;
+        this.detailH = Math.max(60, this.height - this.detailY - 42);
 
         if (this.detailVisible) {
             this.detailW = MathHelper.clamp(this.width / 5, 156, 220);
-            this.detailX = this.width - 6 - this.detailW;
-            this.detailY = 30;
-            this.detailH = Math.max(60, this.height - this.detailY - 42);
-
-            contentRight = this.detailX - 8;
+        } else {
+            this.detailW = DETAIL_STRIP_W;
         }
+
+        this.detailX = this.width - 6 - this.detailW;
+
+        int contentRight = this.detailX - 8;
 
         this.contentW = Math.max(150, contentRight - this.contentX);
         this.contentH = Math.max(60, this.height - this.contentY - 38);
@@ -441,11 +468,10 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         this.renderDetail(drawContext);
         this.renderScrollbar(drawContext);
 
-        // Screens narrower than the detail pane keep the floating tooltip: there is no room for
-        // both columns, and a cut tooltip is still better than no explanation at all.
-        if (!this.detailVisible && this.hoveredElement != null) {
-            this.renderOptionTooltip(drawContext, this.hoveredElement);
-        }
+        // The description always lives in the docked pane / strip on the right, which reserves its
+        // own column. The old floating tooltip was anchored at the row's right edge and spilled
+        // off the screen on a narrow window; it is gone on purpose. When the pane is collapsed the
+        // strip tells the user to press Ctrl+X to read the full text.
 
         if (this.prompt != null) {
             this.prompt.render(drawContext, mouseX, mouseY, delta);
@@ -493,6 +519,21 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         if (this.detailVisible) {
             drawContext.fill(this.detailX, this.detailY, this.detailX + this.detailW, this.detailY + this.detailH, 0xB00B0E14);
             drawContext.fill(this.detailX, this.detailY, this.detailX + 1, this.detailY + this.detailH, 0xFF1D2330);
+        } else {
+            // Collapsed handle: a thin, always-present lit strip docked on the right edge. It is a
+            // reserved column (never a popup), so the list can never draw under it. A chevron and a
+            // stacked CTRL+X cue read as "open me" without needing a wide label.
+            drawContext.fill(this.detailX, this.detailY, this.detailX + this.detailW, this.detailY + this.detailH, 0x700B0E14);
+            drawContext.fill(this.detailX, this.detailY, this.detailX + 1, this.detailY + this.detailH, 0xFF1D2330);
+
+            int cx = this.detailX + (this.detailW / 2) + 1;
+            drawContext.drawCenteredTextWithShadow(this.textRenderer, Text.literal("\u2039"), cx, this.detailY + 6, withAlpha(accent, 0xC0));
+
+            String cue = "CTRL+X";
+            for (int i = 0; i < cue.length(); i++) {
+                drawContext.drawCenteredTextWithShadow(this.textRenderer,
+                        Text.literal(String.valueOf(cue.charAt(i))), cx, this.detailY + 22 + i * 10, 0xFF8A93A3);
+            }
         }
 
         drawContext.fill(this.contentX, this.height - 36, this.width - 6, this.height - 35, 0x22FFFFFF);
@@ -507,6 +548,16 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
         int x = this.detailX + 8;
         int maxWidth = this.detailW - 16;
         int y = this.detailY + 8;
+
+        // Docked-pane header: names the pane and shows how to close it (Ctrl+O). Always drawn, so
+        // the "what is this column" question is answered even before an option is hovered.
+        drawContext.drawTextWithShadow(this.textRenderer, Text.literal("DESCRIÇÃO").formatted(Formatting.BOLD), x, y, this.accent());
+        Text closeHint = Text.literal("Ctrl+O \u2715").formatted(Formatting.GRAY);
+        int closeHintWidth = this.textRenderer.getWidth(closeHint);
+        drawContext.drawTextWithShadow(this.textRenderer, closeHint, this.detailX + this.detailW - 8 - closeHintWidth, y, 0xFF8A93A3);
+        y += 12;
+        drawContext.fill(x, y, this.detailX + this.detailW - 8, y + 1, 0x22FFFFFF);
+        y += 5;
 
         ControlElement<?> element = this.hoveredElement;
 
@@ -807,6 +858,24 @@ public class SodiumOptionsGUI extends Screen implements ScreenPromptable {
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (this.prompt != null && this.prompt.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
+        }
+
+        // Ctrl+X opens the docked description pane, Ctrl+O closes it. They only act when there is
+        // something to do, so the shortcut never "swallows" the key while the pane is already in
+        // the requested state. rebuildGUI re-runs computeLayout, which re-reserves the column.
+        if (this.prompt == null && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            if (keyCode == GLFW.GLFW_KEY_X && !this.detailExpanded) {
+                this.detailExpanded = true;
+                this.detailScroll = 0;
+                this.rebuildGUI();
+                return true;
+            }
+
+            if (keyCode == GLFW.GLFW_KEY_O && this.detailExpanded) {
+                this.detailExpanded = false;
+                this.rebuildGUI();
+                return true;
+            }
         }
 
         if (this.prompt == null && keyCode == GLFW.GLFW_KEY_P && (modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {

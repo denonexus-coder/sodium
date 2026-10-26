@@ -27,6 +27,7 @@ public class SodiumGameOptions {
     public final VisualSettings visual = new VisualSettings();
     public final ExperimentalSettings experimental = new ExperimentalSettings();
     public final MotorSettings motor = new MotorSettings();
+    public final MotorBSettings motorB = new MotorBSettings();
     public final NotificationSettings notifications = new NotificationSettings();
 
     private boolean readOnly;
@@ -263,6 +264,68 @@ public class SodiumGameOptions {
         public long stampLegacyFog = 0;
         public long stampLegacyGround = 0;
         public long stampLegacyTonemap = 0;
+    }
+
+    /**
+     * "Motor B": a second, fully optional colored-light transport that lives on its own
+     * "Luz Avançada" tab. Where the GRID engine stores one omnidirectional colour per cell, Motor
+     * B stores the colour arriving along each of the six axes (+X/-X, +Y/-Y, +Z/-Z) and fuses the
+     * contributions of overlapping sources additively instead of keeping only the brightest. The
+     * result is light that has a direction (a wall lit from one torch is darker on its far face)
+     * and colour that adds up where two lamps meet, at the cost of six times the grid data.
+     *
+     * <p>It is mutually exclusive with the GRID / ANALYTIC engines of the Experimental tab, by
+     * construction: {@link #enabled} is the single switch the renderer reads, and while it is on
+     * Motor B owns the colored-light transport and the Experimental engine selector is left intact
+     * but dormant. Turning it back off hands the transport straight back to GRID, with every GRID
+     * setting exactly where it was. Nothing here is forced on: with {@link #enabled} false the
+     * scan, the upload and the shader are byte-for-byte the GRID path.
+     *
+     * <p>Fase 0 wires only the GUI and the config; the six-axis store, the additive fusion and the
+     * directional sampling in the chunk shader stay behind {@code #ifdef} until the later phases.
+     * Nothing here has been compiled or run.
+     */
+    public static class MotorBSettings {
+        /**
+         * Master switch. Off = the colored light is the normal GRID path and this whole tab has
+         * no effect. On = Motor B owns the transport, overriding the Experimental engine selector
+         * for the session while leaving its value untouched.
+         */
+        public boolean enabled = false;
+
+        /**
+         * Store the colour per axis (six directions) instead of one omni value. This is what makes
+         * the light directional; off, Motor B still fuses additively but lights every face the
+         * same, which is cheaper but flatter.
+         */
+        public boolean directional = true;
+
+        /**
+         * Sum the colour of overlapping sources (additive fusion) instead of keeping the brightest
+         * (the GRID rule). Two coloured lamps in the same cell mix their hues; off, the brighter
+         * one simply wins, as in GRID.
+         */
+        public boolean additiveFusion = true;
+
+        /** 0..100. How strongly the per-axis direction modulates a face. 0 = flat like GRID. */
+        public int directionalStrength = 60;
+
+        /**
+         * 0..100. Ceiling on the additive sum, as a share of full white, so a cluster of lamps
+         * saturates to a colour instead of blowing out to white. 100 = no clamp.
+         */
+        public int fusionCeiling = 80;
+
+        /** Grid resolution drops with distance to pay for the six-axis store. Scan-only. */
+        public boolean gridLod = true;
+
+        /**
+         * Monotonic clock and stamp used by the last-wins rule between the colored-light engines.
+         * Plain numbers so the ordering survives a save/load. 0 means "never turned on".
+         */
+        public long conflictClock = 0;
+        public long stampMotorB = 0;
+        public long stampLegacyEngine = 0;
     }
 
     /** The two profiles the chunk shader can build; they are mutually exclusive. */
