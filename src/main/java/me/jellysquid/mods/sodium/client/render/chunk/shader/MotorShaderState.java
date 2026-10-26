@@ -23,10 +23,10 @@ import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
  * that keys the program cache.
  */
 public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boolean tonemap,
-                               boolean grid, boolean gridLod, boolean shafts, boolean motorB) {
+                               boolean grid, boolean gridLod, boolean shafts, boolean motorB, boolean listLights) {
 
     /** Nothing lit: identical to the stock Sodium shader. */
-    public static final MotorShaderState OFF = new MotorShaderState(false, false, false, false, false, false, false, false);
+    public static final MotorShaderState OFF = new MotorShaderState(false, false, false, false, false, false, false, false, false);
 
     /** True when at least one Motor body is compiled in; gates the shared varyings. */
     public boolean any() {
@@ -36,7 +36,13 @@ public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boole
     /** A copy with the Motor B transport switched off, used by the shader fallback ladder. */
     public MotorShaderState withMotorB(boolean value) {
         return new MotorShaderState(this.shadow, this.sheen, this.fog, this.tonemap,
-                this.grid, this.gridLod, this.shafts, value);
+                this.grid, this.gridLod, this.shafts, value, this.listLights);
+    }
+
+    /** A copy with the list transport switched off. */
+    public MotorShaderState withListLights(boolean value) {
+        return new MotorShaderState(this.shadow, this.sheen, this.fog, this.tonemap,
+                this.grid, this.gridLod, this.shafts, this.motorB, value);
     }
 
     /**
@@ -56,13 +62,14 @@ public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boole
 
         SodiumGameOptions.MotorSettings m = options.motor;
 
-        // Motor B is not one of the single-pass "slots": it is its own transport under the
-        // "Luz Avançada" switch, so it is resolved before the Motor master switch and survives
-        // when the rest of Motor is off.
+        // Motor B and the list transport are the two coloured-light engines. They are resolved
+        // here (before the single-pass slots) so that the shader gets the right defines even
+        // when the Motor master switch is off.
         boolean motorB = ColoredLighting.useMotorB();
+        boolean listLights = ColoredLighting.useListLights();
 
         if (!m.enabled || ColoredLighting.isIrisLoaded()) {
-            return OFF.withMotorB(motorB);
+            return OFF.withMotorB(motorB).withListLights(listLights);
         }
 
         boolean shadow = m.analyticShadow && MotorConflicts.motorOwns(MotorConflicts.Slot.SHADOW, legacyShadow(options));
@@ -73,7 +80,7 @@ public record MotorShaderState(boolean shadow, boolean sheen, boolean fog, boole
         boolean gridLod = grid && m.gridLod;
         boolean shafts = m.lightShafts;
 
-        return new MotorShaderState(shadow, sheen, fog, tonemap, grid, gridLod, shafts, motorB);
+        return new MotorShaderState(shadow, sheen, fog, tonemap, grid, gridLod, shafts, motorB, listLights);
     }
 
     // ---- what the legacy (Experimental / MakeUp profile) side currently wants, per slot ----

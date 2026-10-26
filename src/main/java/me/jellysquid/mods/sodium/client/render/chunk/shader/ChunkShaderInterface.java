@@ -12,8 +12,10 @@ import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformInt;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformMatrix4f;
 import me.jellysquid.mods.sodium.client.render.MakeupProfile;
+import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.AnalyticLighting;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.ListLights;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.impl.CompactChunkVertex;
 import me.jellysquid.mods.sodium.client.util.TextureUtil;
 import me.jellysquid.mods.sodium.mixin.core.render.texture.SpriteAtlasTextureAccessor;
@@ -103,6 +105,12 @@ public class ChunkShaderInterface {
     private final GlUniformFloat3v uniformMotorBScale;
     private final GlUniformFloat uniformMotorBStrength;
     private final GlUniformFloat uniformMotorBCeiling;
+
+    // The list transport: a uniform buffer bound globally (binding 1) plus the origin/scale the
+    // fragment shader needs to locate the cluster of the surface it is drawing.
+    private final GlUniformFloat3v uniformListLightsOrigin;
+    private final GlUniformFloat3v uniformListLightsScale;
+    private final GlUniformFloat uniformListLightsStrength;
 
     private MakeupProfile.Frame makeupFrame;
 
@@ -203,6 +211,17 @@ public class ChunkShaderInterface {
             this.uniformMotorBScale = null;
             this.uniformMotorBStrength = null;
             this.uniformMotorBCeiling = null;
+        }
+
+        // The list transport: its own uniform buffer plus origin/scale the fragment shader needs.
+        if (options.motor().listLights()) {
+            this.uniformListLightsOrigin = context.bindUniform("u_ListLightsOrigin", GlUniformFloat3v::new);
+            this.uniformListLightsScale = context.bindUniform("u_ListLightsScale", GlUniformFloat3v::new);
+            this.uniformListLightsStrength = context.bindUniform("u_ListLightsStrength", GlUniformFloat::new);
+        } else {
+            this.uniformListLightsOrigin = null;
+            this.uniformListLightsScale = null;
+            this.uniformListLightsStrength = null;
         }
 
         if (options.makeupProfile()) {
@@ -355,6 +374,27 @@ public class ChunkShaderInterface {
             this.uniformMotorBCeiling.setFloat(0.4F + 1.6F * percent(motorB.fusionCeiling));
 
             GlStateManager._activeTexture(GL32C.GL_TEXTURE0);
+        }
+
+        // The list transport's UBO is global state bound by ListLights itself; the uniforms here
+        // only describe the local origin of the 64x32x64 cluster box.
+        if (this.uniformListLightsOrigin != null) {
+            ListLights.bind();
+
+            this.uniformListLightsOrigin.set(
+                    ListLights.getOriginX() - (float) cameraPos.x,
+                    ListLights.getOriginY() - (float) cameraPos.y,
+                    ListLights.getOriginZ() - (float) cameraPos.z);
+
+            this.uniformListLightsScale.set(
+                    ListLights.getScaleX(),
+                    ListLights.getScaleY(),
+                    ListLights.getScaleZ());
+
+            SodiumGameOptions options = SodiumClientMod.options();
+            if (options != null) {
+                this.uniformListLightsStrength.setFloat(percent(options.motorB.directionalStrength));
+            }
         }
 
         if (this.uniformHandLight != null) {

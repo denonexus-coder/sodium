@@ -320,6 +320,15 @@ public class SodiumGameOptions {
         public boolean gridLod = true;
 
         /**
+         * The "many lights" transport: a clustered list of point lights in a uniform buffer
+         * instead of the six-axis atlas. It skips the flood (the expensive part) and costs one
+         * scan plus a 172 KB upload per rebuild, at the price of a per-fragment light loop and a
+         * coarser occlusion (gated by the vanilla block-light column). Mutually exclusive with
+         * {@link #enabled}: last one on wins, resolved in {@code ColoredLighting.useMotorB()}.
+         */
+        public boolean listLights = false;
+
+        /**
          * Monotonic clock and stamp used by the last-wins rule between the colored-light engines.
          * Plain numbers so the ordering survives a save/load. 0 means "never turned on".
          */

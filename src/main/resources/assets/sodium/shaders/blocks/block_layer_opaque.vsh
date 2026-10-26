@@ -51,6 +51,11 @@ out float v_MaterialTranslucent;
 out vec3 v_MotorBWorldPos;
 #endif
 
+// The list transport needs the same camera-relative world space for its cluster lookup.
+#ifdef LIST_LIGHTS
+out vec3 v_ListWorldPos;
+#endif
+
 // ── Motor single-pass engine ─────────────────────────────────────────────────
 // Every Motor varying lives under MOTOR_ENABLED, so with the engine off (none of the defines
 // present) not one extra out slot is emitted and the program matches the stock shader. The
@@ -291,6 +296,11 @@ void main() {
 #ifdef MOTOR_B
     // Camera-relative world space, the same space u_MotorBOrigin is uploaded in.
     v_MotorBWorldPos = position;
+#endif
+
+#ifdef LIST_LIGHTS
+    // Camera-relative world space, the same space the list's cluster box is laid out in.
+    v_ListWorldPos = position;
 #endif
 
 #ifdef USE_FOG

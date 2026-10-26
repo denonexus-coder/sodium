@@ -386,6 +386,7 @@ public final class ColoredLighting {
     private static boolean shaderFailed;
     private static boolean analyticFailed;
     private static boolean motorBFailed;
+    private static boolean listFailed;
 
     private ColoredLighting() {
     }
@@ -438,8 +439,23 @@ public final class ColoredLighting {
 
         // Motor B is its own transport, not a variant of the Experimental engine: the master
         // switch in "Luz Avançada" is enough, the GRID/ANALYTIC selector stays off and untouched.
-        return opts != null && opts.motorB.enabled && !shaderFailed && !motorBFailed
-                && !isIrisShaderPackInUse();
+        // The list transport is the other side of the same coin, so only one of them can own it.
+        return opts != null && opts.motorB.enabled && !opts.motorB.listLights
+                && !shaderFailed && !motorBFailed && !isIrisShaderPackInUse();
+    }
+
+    /**
+     * Whether the clustered list transport owns the coloured light right now.
+     *
+     * <p>It is the "many lights" path: the sources are written to a uniform buffer by
+     * {@link ListLights} and the fragment shader walks the lights of its cluster. The switch is
+     * in the same tab and the two transports are exclusive, so turning one on turns the other off.
+     */
+    public static boolean useListLights() {
+        SodiumGameOptions opts = SodiumClientMod.options();
+
+        return opts != null && opts.motorB.listLights
+                && !shaderFailed && !listFailed && !isIrisShaderPackInUse();
     }
 
     /**
@@ -488,11 +504,17 @@ public final class ColoredLighting {
         motorBFailed = true;
     }
 
+    /** Called when the list transport program failed to compile; it is dropped for the session. */
+    public static void markListFailed() {
+        listFailed = true;
+    }
+
     /** Lets the user retry after changing the path, without restarting the game. */
     public static void resetShaderFailure() {
         shaderFailed = false;
         analyticFailed = false;
         motorBFailed = false;
+        listFailed = false;
         gridDirty = true;
     }
 
@@ -642,7 +664,7 @@ public final class ColoredLighting {
 
         // The profile needs the grid even when the normal engine is off: it is the field that
         // carries the colour of the sources placed in the world.
-        if ((!isActive() && !isProfileActive() && !useMotorB())
+        if ((!isActive() && !isProfileActive() && !useMotorB() && !useListLights())
                 || client.world == null || client.player == null || client.isPaused()) {
             return;
         }
@@ -699,6 +721,14 @@ public final class ColoredLighting {
     // ---- Grid rebuild ---------------------------------------------------------------------
 
     private static void rebuildGrid(ClientWorld world, int centerX, int centerY, int centerZ) {
+        if (useListLights()) {
+            // The list owns the transport when its switch is on: a scan plus the clustered UBO,
+            // no flood. The atlas underneath is left untouched so turning it off restores the
+            // previous field on the next rebuild.
+            ListLights.rebuild(world, centerX, centerY, centerZ);
+            return;
+        }
+
         if (useMotorB()) {
             // Motor B owns the transport when its switch is on; the GRID and the profile's
             // Rethinking field stay untouched underneath so turning it off restores them on the

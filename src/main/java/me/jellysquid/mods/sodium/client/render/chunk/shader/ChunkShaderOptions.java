@@ -150,6 +150,12 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             constants.add("MOTOR_B");
         }
 
+        // The clustered list transport carries its own uniform buffer; defined independently of
+        // the single-pass Motor slots above.
+        if (this.motor.listLights()) {
+            constants.add("LIST_LIGHTS");
+        }
+
         return constants.build();
     }
 }

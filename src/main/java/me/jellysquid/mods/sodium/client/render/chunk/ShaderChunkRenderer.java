@@ -104,6 +104,20 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                 }
             }
 
+            // The list transport is the second coloured-light engine: drop it before the rest.
+            if (attempt.motor().listLights()) {
+                SodiumClientMod.logger().error("List transport shader failed to compile; retrying without the clustered list", failure);
+                ColoredLighting.markListFailed();
+                attempt = attempt.withMotor(attempt.motor().withListLights(false));
+
+                try {
+                    return createShader(path, attempt, colored, analytic, maxLights);
+                } catch (RuntimeException nested) {
+                    nested.addSuppressed(failure);
+                    failure = nested;
+                }
+            }
+
             // The Motor engine is the newest and most optional path, so it is dropped first: a
             // driver that chokes on one of the Motor bodies loses the Motor effects but keeps the
             // colored light, the reflection and the profile. Without this the fallback chain never
@@ -201,8 +215,9 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
                 && !pass.supportsFragmentDiscard();
         boolean makeupProfile = MakeupProfile.isEnabled();
         boolean motorB = ColoredLighting.useMotorB();
-        boolean makeupRethinking = makeupProfile && !motorB && MakeupProfile.isRethinking();
-        boolean makeupColoredLights = makeupProfile && !motorB
+        boolean listLights = ColoredLighting.useListLights();
+        boolean makeupRethinking = makeupProfile && !motorB && !listLights && MakeupProfile.isRethinking();
+        boolean makeupColoredLights = makeupProfile && !motorB && !listLights
                 && (makeupRethinking || SodiumClientMod.options().experimental.makeupColoredLights);
 
         // The Motor engine is resolved per draw against the legacy options (last-wins). It is OFF

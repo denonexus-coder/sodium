@@ -1001,9 +1001,28 @@ public class SodiumGameOptionPages {
                 .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
                 .build();
 
+        Option<Boolean> listLights = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Lista de luzes (cluster UBO)"))
+                .setTooltip(Text.literal("Substitui o Motor B (6 eixos) por uma tabela clusterizada em UBO com 256 fontes. "
+                        + "Custo: 172 KB de upload por reconstrução, mas sem flood 6-eixos. "
+                        + "Mutualmente exclusivo com o Motor B: o último ligado ganha (last-wins)."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motorB.listLights = value;
+                    if (value) {
+                        opts.motorB.stampMotorB = ++opts.motorB.conflictClock;
+                        opts.motorB.enabled = false; // exclusão mútua: a lista ganha
+                    }
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motorB.listLights)
+                .setImpact(OptionImpact.VARIES)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
         groups.add(OptionGroup.createBuilder()
                 .setName(Text.literal("Luz Avançada").formatted(Formatting.LIGHT_PURPLE))
                 .add(enabled)
+                .add(listLights)
                 .build());
 
         Option<Boolean> directional = OptionImpl.createBuilder(boolean.class, sodiumOpts)

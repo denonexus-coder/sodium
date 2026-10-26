@@ -73,6 +73,26 @@ uniform float u_MotorBStrength;
 uniform float u_MotorBCeiling;
 #endif
 
+// ── Clustered list transport (many lights, GPU) ─────────────────────────────────
+// The list replaces the six-axis atlas when its switch is on; it reads a std140 UBO at binding 1
+// (binding 1 is free: ChunkData is on 3, the coloured atlas on 2, water on 3). The cluster box is 64x32x64,
+// divided into 16x8x16 clusters; each cluster stores a dense list of up to 16 point lights.
+#ifdef LIST_LIGHTS
+in vec3 v_ListWorldPos;
+
+layout(std140, binding = 1) uniform ListData {
+    ivec4 u_ListCfg;                 // x = lightCount, y/z = grid size (unused), w = flags
+    vec4 u_ListLightsA[256];         // x/y/z/radius
+    vec4 u_ListLightsB[256];         // r/g/b/intensity
+    uvec2 u_ListRange[2048];         // (offset, count) per cluster
+    uvec4 u_ListIndex[8192];         // 4 slots per uvec4 = 32768 max
+};
+
+uniform vec3 u_ListLightsOrigin;
+uniform vec3 u_ListLightsScale;
+uniform float u_ListLightsStrength;
+#endif
+
 out vec4 fragColor; // The output fragment for the color framebuffer
 
 #import <sodium:include/makeup.glsl>
@@ -278,6 +298,60 @@ void main() {
 
             diffuseColor.rgb = min(diffuseColor.rgb, vec3(1.30));
         }
+    }
+#endif
+
+#ifdef LIST_LIGHTS
+    {
+        vec3 listWorldDir = normalize(-v_ListWorldPos);
+        vec3 listNormal = normalize(cross(dFdx(v_ListWorldPos), dFdy(v_ListWorldPos)));
+        listNormal = faceforward(listNormal, -listWorldDir, listNormal);
+
+        // Cluster lookup: the grid is 64x32x64 with 16x8x16 clusters.
+        vec3 listCell = (v_ListWorldPos - u_ListLightsOrigin) * u_ListLightsScale;
+        int listCX = int(clamp(listCell.x * 15.99999, 0.0, 15.0));
+        int listCY = int(clamp(listCell.y * 7.99999, 0.0, 7.0));
+        int listCZ = int(clamp(listCell.z * 15.99999, 0.0, 15.0));
+        int listCluster = (listCY * 16 + listCZ) * 16 + listCX;
+        int listOff = int(u_ListData.u_ListRange[listCluster].x);
+        int listN = int(min(u_ListData.u_ListRange[listCluster].y, 16));
+
+        float listAccumR = 0.0, listAccumG = 0.0, listAccumB = 0.0;
+        float listAccumI = 0.0;
+
+        for (int listJ = 0; listJ < listN; listJ++) {
+            int listSlotOffInQuad = listOff % 4;
+            int listSlot = int(u_ListData.u_ListIndex[listOff / 4 + listSlotOffInQuad / 4]);
+            int listSlotFixed = (int)listSlot;
+
+            float lx = u_ListData.u_ListLightsA[listSlotFixed].x;
+            float ly = u_ListData.u_ListLightsA[listSlotFixed].y;
+            float lz = u_ListData.u_ListLightsA[listSlotFixed].z;
+            float lr = u_ListData.u_ListLightsA[listSlotFixed].w;
+            float lr2 = lr * lr;
+            float cr = u_ListData.u_ListLightsB[listSlotFixed].x;
+            float cg = u_ListData.u_ListLightsB[listSlotFixed].y;
+            float cb = u_ListData.u_ListLightsB[listSlotFixed].z;
+            float ci = u_ListData.u_ListLightsB[listSlotFixed].w;
+
+            float dSq = dot(v_ListWorldPos - vec3(lx, ly, lz), v_ListWorldPos - vec3(lx, ly, lz));
+            float att = max(0.0, 1.0 - dSq / (lr2 + 0.05));
+            att *= att;
+
+            listAccumR += cr * att;
+            listAccumG += cg * att;
+            listAccumB += cb * att;
+            listAccumI += ci * att;
+        }
+
+        float listStrength = min(1.0, max(0.0, listAccumI));
+        vec3 listCol = vec3(listAccumR, listAccumG, listAccumB) * u_ListLightsStrength;
+
+        // Apply as a gentle multiplicative light (not pure addition), gated by the vanilla block
+        // light column (zero behind walls) to avoid bleeding through opaque surfaces.
+        float listGate = smoothstep(0.0, 0.05, v_Color.a);
+        diffuseColor.rgb *= mix(vec3(1.0), 1.0 + listCol * 0.55, listStrength * listGate);
+        diffuseColor.rgb = min(diffuseColor.rgb, vec3(1.45));
     }
 #endif
 
