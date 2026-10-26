@@ -85,6 +85,22 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         } catch (RuntimeException first) {
             RuntimeException failure = first;
 
+            // The Motor engine is the newest and most optional path, so it is dropped first: a
+            // driver that chokes on one of the Motor bodies loses the Motor effects but keeps the
+            // colored light, the reflection and the profile. Without this the fallback chain never
+            // removed the Motor defines and a Motor shader bug would blacken the terrain.
+            if (attempt.motor().any()) {
+                SodiumClientMod.logger().error("Motor shader failed to compile; retrying without the Motor engine", failure);
+                attempt = attempt.withMotor(MotorShaderState.OFF);
+
+                try {
+                    return createShader(path, attempt, colored, analytic, maxLights);
+                } catch (RuntimeException nested) {
+                    nested.addSuppressed(failure);
+                    failure = nested;
+                }
+            }
+
             // Drop the optional paths cumulatively: first the smaller reflection, then the
             // profile. Retrying the original options after the reflection failure would put the
             // reflection back and make the fallback fail again on the same driver.
@@ -168,8 +184,15 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         boolean makeupRethinking = makeupProfile && MakeupProfile.isRethinking();
         boolean makeupColoredLights = makeupProfile
                 && (makeupRethinking || SodiumClientMod.options().experimental.makeupColoredLights);
+
+        // The Motor engine is resolved per draw against the legacy options (last-wins). It is OFF
+        // whenever the master switch is off or Iris owns the pipeline, so the default path keeps
+        // today's shader. Different Motor configs produce different ChunkShaderOptions, so the
+        // program cache stays correct.
+        MotorShaderState motor = MotorShaderState.resolve();
+
         ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType,
-                surfaceReflection, makeupProfile, makeupColoredLights, makeupRethinking);
+                surfaceReflection, makeupProfile, makeupColoredLights, makeupRethinking, motor);
 
         this.activeProgram = this.compileProgram(options);
         this.activeProgram.bind();

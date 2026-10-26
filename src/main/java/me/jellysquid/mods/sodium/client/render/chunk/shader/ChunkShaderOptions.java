@@ -6,7 +6,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexTy
 
 public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
                                  boolean surfaceReflection, boolean makeupProfile, boolean makeupColoredLights,
-                                 boolean makeupRethinking) {
+                                 boolean makeupRethinking, MotorShaderState motor) {
     /**
      * Kept for binary compatibility with Iris.
      *
@@ -18,7 +18,18 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
      */
     public ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
                               boolean surfaceReflection, boolean makeupProfile) {
-        this(fog, pass, vertexType, surfaceReflection, makeupProfile, false, false);
+        this(fog, pass, vertexType, surfaceReflection, makeupProfile, false, false, MotorShaderState.OFF);
+    }
+
+    /**
+     * Seven-argument overload kept for callers written before the Motor engine existed. The Motor
+     * state defaults to {@link MotorShaderState#OFF}, so an old call produces today's shader.
+     */
+    public ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, ChunkVertexType vertexType,
+                              boolean surfaceReflection, boolean makeupProfile, boolean makeupColoredLights,
+                              boolean makeupRethinking) {
+        this(fog, pass, vertexType, surfaceReflection, makeupProfile, makeupColoredLights, makeupRethinking,
+                MotorShaderState.OFF);
     }
 
     public ChunkShaderOptions withSurfaceReflection(boolean value) {
@@ -27,7 +38,7 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         }
 
         return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, value, this.makeupProfile,
-                this.makeupColoredLights, this.makeupRethinking);
+                this.makeupColoredLights, this.makeupRethinking, this.motor);
     }
 
     public ChunkShaderOptions withMakeupProfile(boolean value) {
@@ -36,7 +47,17 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
         }
 
         return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection, value,
-                value && this.makeupColoredLights, value && this.makeupRethinking);
+                value && this.makeupColoredLights, value && this.makeupRethinking, this.motor);
+    }
+
+    /** Returns a copy with the Motor engine state replaced; used by the compile-fallback chain. */
+    public ChunkShaderOptions withMotor(MotorShaderState value) {
+        if (this.motor.equals(value)) {
+            return this;
+        }
+
+        return new ChunkShaderOptions(this.fog, this.pass, this.vertexType, this.surfaceReflection,
+                this.makeupProfile, this.makeupColoredLights, this.makeupRethinking, value);
     }
 
     public ShaderConstants constants() {
@@ -87,6 +108,39 @@ public record ChunkShaderOptions(ChunkFogMode fog, TerrainRenderPass pass, Chunk
             // told apart later without touching the transport.
             if (this.makeupRethinking) {
                 constants.add("MAKEUP_RETHINKING");
+            }
+        }
+
+        // The Motor engine. Every body is additive and compiles only its own define, so with the
+        // whole thing off (MotorShaderState.OFF) not a single extra line reaches the compiler and
+        // the program is identical to the stock shader. Each flag is already resolved last-wins
+        // against the legacy options in MotorShaderState.resolve().
+        if (this.motor.any()) {
+            constants.add("MOTOR_ENABLED");
+
+            if (this.motor.shadow()) {
+                constants.add("MOTOR_SHADOW");
+            }
+            if (this.motor.sheen()) {
+                constants.add("MOTOR_SHEEN");
+            }
+            if (this.motor.fog()) {
+                constants.add("MOTOR_FOG");
+            }
+            if (this.motor.tonemap()) {
+                constants.add("MOTOR_TONEMAP");
+            }
+            // The clustered grid reads the same colour atlas the colored-light engine uploads.
+            // The shader guards its body with COLORED_LIGHTING / MAKEUP_COLORED_LIGHTS, so with
+            // no atlas present it is a no-op.
+            if (this.motor.grid()) {
+                constants.add("MOTOR_GRID");
+            }
+            if (this.motor.gridLod()) {
+                constants.add("MOTOR_GRID_LOD");
+            }
+            if (this.motor.shafts()) {
+                constants.add("MOTOR_SHAFTS");
             }
         }
 

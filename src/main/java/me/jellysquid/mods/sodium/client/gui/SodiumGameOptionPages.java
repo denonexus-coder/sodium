@@ -12,6 +12,7 @@ import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
 import me.jellysquid.mods.sodium.client.gui.options.storage.MinecraftOptionsStorage;
 import me.jellysquid.mods.sodium.client.gui.options.storage.SodiumOptionsStorage;
 import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
+import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds;
 import net.minecraft.client.MinecraftClient;
@@ -710,6 +711,227 @@ public class SodiumGameOptionPages {
      * file is handed to the driver as-is, so a driver that disagrees with it fails the shader, not
      * the option.
      */
+    /**
+     * The "Motor" tab: a single-pass lighting engine that reproduces the look of a heavy Iris pack
+     * without any full-screen pass. Every row here is additive and defaults to off, so with the
+     * whole tab disabled the pipeline is bit-for-bit today's Sodium. The master switch gates the
+     * rest; sub-rows gray out the instant it is unticked (via {@link GatedOption}).
+     *
+     * <p>A few effects overlap with the Experimental tab or a MakeUp profile (ambient shadow,
+     * metallic sheen, distance fog, ground light, tonemap). Those are not forbidden: the resolver
+     * in {@link MotorConflicts} lets the <em>last side enabled</em> win, so turning a Motor effect
+     * on claims the slot from the legacy option and turning it back off hands the slot back. Each
+     * conflicting toggle stamps its slot through {@link MotorConflicts#touchMotor}.
+     *
+     * <p>Fase 0 wires only the GUI and the config; the shader bodies stay dark behind {@code #ifdef}
+     * until the later phases light them one effect at a time. Nothing here has been compiled or run.
+     */
+    public static OptionPage motor() {
+        List<OptionGroup> groups = new ArrayList<>();
+
+        // All gates read the live config so a sub-row reacts before Apply is pressed. Null-safe:
+        // before the options are loaded every gate is closed, i.e. today's behaviour.
+        BooleanSupplier motorOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motor.enabled;
+        };
+        BooleanSupplier shadowOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motor.enabled && o.motor.analyticShadow;
+        };
+        BooleanSupplier sheenOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motor.enabled && o.motor.metallicSheen;
+        };
+        BooleanSupplier gridOn = () -> {
+            SodiumGameOptions o = SodiumClientMod.options();
+            return o != null && o.motor.enabled && o.motor.clusteredGrid;
+        };
+
+        Option<Boolean> enabled = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Motor (luz de passe único)"))
+                .setTooltip(Text.literal("Liga o motor de iluminação de passe único: a cor, a sombra e o reflexo são "
+                        + "calculados dentro do próprio shader do terreno, sem nenhuma passagem de ecrã inteiro. "
+                        + "É o oposto de um pack Iris, que faz cada efeito numa passagem separada e paga uma ida e "
+                        + "volta à memória por passagem — o que numa GPU de telemóvel (tile-based) é o grande custo. "
+                        + "O objetivo é um visual comparável ao de um pack Iris a uma fração do custo.\n\n"
+                        + "É o interruptor-mestre: com ele desligado, nada nesta aba tem efeito e o renderizador fica "
+                        + "idêntico ao Sodium de hoje. As linhas abaixo só ficam ativas com isto ligado.\n\n"
+                        + "Honestidade: o passe único NÃO faz shadow map, reflexo de ecrã (SSR) nem volumétrico reais "
+                        + "— aproxima-os por ALU on-chip. «Mesmo visual» quer dizer estilo comparável, não pixel a "
+                        + "pixel. Aplicar recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.motor.enabled = value, opts -> opts.motor.enabled)
+                .setImpact(OptionImpact.VARIES)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Motor").formatted(Formatting.AQUA))
+                .add(enabled)
+                .build());
+
+        // ---- Sombra analítica (slot SHADOW) ----
+        Option<Boolean> analyticShadow = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Sombra analítica"))
+                .setTooltip(Text.literal("Aproxima a sombra ambiente a partir da luz do céu, da luz de bloco, do AO e da "
+                        + "direção do sol, tudo por ALU dentro do shader do terreno — sem shadow map e sem passagem "
+                        + "extra. A sombra é luz ambiente tingida por oclusão, não um escurecimento cinzento.\n\n"
+                        + "Conflito: partilha o lugar da sombra colorida da aba Experimental e do perfil MakeUp. Quem "
+                        + "foi ligado por último manda; desligar devolve o lugar ao outro. Aplicar recarrega o "
+                        + "renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motor.analyticShadow = value;
+                    MotorConflicts.touchMotor(MotorConflicts.Slot.SHADOW, value);
+                }, opts -> opts.motor.analyticShadow)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Integer> shadowStrength = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Força da sombra"))
+                .setTooltip(Text.literal("Quanto a sombra analítica escurece a face oclusa. A 0% quase não se nota; a "
+                        + "100% o contraste é forte. É um uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.motor.shadowStrength = value, opts -> opts.motor.shadowStrength)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        // ---- Brilho metálico (slot SHEEN) ----
+        Option<Boolean> metallicSheen = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Brilho metálico"))
+                .setTooltip(Text.literal("Acrescenta um realce especulado a metais e superfícies lisas a partir da normal "
+                        + "e da direção da luz, por ALU — sem reflexo de ecrã (SSR), que numa GPU tile-based é o pior "
+                        + "caso. É um brilho de superfície, não um espelho da cena.\n\n"
+                        + "Conflito: partilha o lugar do reflexo do perfil MakeUp. Último a ligar manda. Aplicar "
+                        + "recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motor.metallicSheen = value;
+                    MotorConflicts.touchMotor(MotorConflicts.Slot.SHEEN, value);
+                }, opts -> opts.motor.metallicSheen)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Integer> sheenStrength = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Força do brilho"))
+                .setTooltip(Text.literal("Intensidade do realce metálico. É um uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.motor.sheenStrength = value, opts -> opts.motor.sheenStrength)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        Option<Integer> sheenSoftness = OptionImpl.createBuilder(int.class, sodiumOpts)
+                .setName(Text.literal("Suavidade do brilho"))
+                .setTooltip(Text.literal("Largura do realce: baixo dá um ponto de luz apertado, alto espalha-o pela "
+                        + "superfície. É um uniform por frame; não recarrega o shader."))
+                .setControl(option -> new SliderControl(option, 0, 100, 5, value -> Text.literal(value + "%")))
+                .setBinding((opts, value) -> opts.motor.sheenSoftness = value, opts -> opts.motor.sheenSoftness)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        // ---- Névoa em linha (slot FOG) ----
+        Option<Boolean> inlineFog = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Névoa em linha"))
+                .setTooltip(Text.literal("Calcula a névoa de distância e de altura dentro do shader do terreno, no mesmo "
+                        + "passe, em vez de numa passagem à parte. Mistura a cor do céu na distância sem custo de "
+                        + "banda.\n\n"
+                        + "Conflito: partilha o lugar da névoa do perfil MakeUp. Último a ligar manda. Aplicar "
+                        + "recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motor.inlineFog = value;
+                    MotorConflicts.touchMotor(MotorConflicts.Slot.FOG, value);
+                }, opts -> opts.motor.inlineFog)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        // ---- Tonemap em linha (slot TONEMAP) ----
+        Option<Boolean> inlineTonemap = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Tonemap em linha"))
+                .setTooltip(Text.literal("Aplica a curva de tom (o «filme» que dá contraste e cor ao resultado) no fim do "
+                        + "shader do terreno, em vez de numa passagem de pós-processamento de ecrã inteiro. Poupa "
+                        + "uma ida e volta à memória por frame.\n\n"
+                        + "Conflito: partilha o lugar do tonemap do perfil MakeUp. Último a ligar manda. Aplicar "
+                        + "recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motor.inlineTonemap = value;
+                    MotorConflicts.touchMotor(MotorConflicts.Slot.TONEMAP, value);
+                }, opts -> opts.motor.inlineTonemap)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Efeitos"))
+                .add(new GatedOption<>(analyticShadow, motorOn))
+                .add(new GatedOption<>(shadowStrength, shadowOn))
+                .add(new GatedOption<>(metallicSheen, motorOn))
+                .add(new GatedOption<>(sheenStrength, sheenOn))
+                .add(new GatedOption<>(sheenSoftness, sheenOn))
+                .add(new GatedOption<>(inlineFog, motorOn))
+                .add(new GatedOption<>(inlineTonemap, motorOn))
+                .build());
+
+        // ---- Grelha agrupada de luz (slot GROUND) ----
+        Option<Boolean> clusteredGrid = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Grelha de luz do chão"))
+                .setTooltip(Text.literal("Pré-calcula no CPU uma grelha agrupada da luz de bloco em redor do jogador e "
+                        + "amostra-a no shader, dando uma luz de chão suave e com cor sem custo de passe. É o mesmo "
+                        + "varrimento que a luz colorida já faz, só reorganizado numa grelha.\n\n"
+                        + "Conflito: partilha o lugar da luz de chão do perfil MakeUp. Último a ligar manda. Aplicar "
+                        + "recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motor.clusteredGrid = value;
+                    MotorConflicts.touchMotor(MotorConflicts.Slot.GROUND, value);
+                    // The scan content changes, not the program: rebuild the grid next tick.
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motor.clusteredGrid)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        Option<Boolean> gridLod = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Grelha com nível de detalhe"))
+                .setTooltip(Text.literal("Reduz a resolução da grelha com a distância: fina perto, grosseira longe. Corta "
+                        + "o custo do pré-cálculo e da memória sem mudar o que se vê perto do jogador. É só conteúdo "
+                        + "de varrimento; reconstrói a grelha no tick seguinte."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.motor.gridLod = value;
+                    ColoredLighting.markDirty();
+                }, opts -> opts.motor.gridLod)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
+        // ---- Feixes de luz (Motor-only, sem slot) ----
+        Option<Boolean> lightShafts = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Feixes de luz"))
+                .setTooltip(Text.literal("Dá um brilho direcional barato onde a luz do céu entra (god rays aproximados), "
+                        + "por ALU no shader do terreno — não é volumétrico real, é uma aproximação de passe único. "
+                        + "Não tem equivalente na aba Experimental, por isso não entra em conflito com nada. Aplicar "
+                        + "recarrega o renderizador."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> opts.motor.lightShafts = value, opts -> opts.motor.lightShafts)
+                .setImpact(OptionImpact.LOW)
+                .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                .build();
+
+        groups.add(OptionGroup.createBuilder()
+                .setName(Text.literal("Luz do chão e extras"))
+                .add(new GatedOption<>(clusteredGrid, motorOn))
+                .add(new GatedOption<>(gridLod, gridOn))
+                .add(new GatedOption<>(lightShafts, motorOn))
+                .build());
+
+        return new OptionPage(Text.literal("Motor"), ImmutableList.copyOf(groups));
+    }
+
     public static OptionPage experimental() {
         List<OptionGroup> groups = new ArrayList<>();
         boolean irisPack = ColoredLighting.isIrisShaderPackInUse();
@@ -812,7 +1034,11 @@ public class SodiumGameOptionPages {
                         + "Só tem efeito com o Sistema de iluminação colorida ligado. Com um shaderpack do Iris "
                         + "ativo, ou com o Iris instalado, fica desligado." + newIrisNote))
                 .setControl(TickBoxControl::new)
-                .setBinding((opts, value) -> opts.experimental.coloredShadows = value,
+                .setBinding((opts, value) -> {
+                            opts.experimental.coloredShadows = value;
+                            // Legacy side of the SHADOW slot: stamp it so last-wins vs the Motor tab.
+                            MotorConflicts.touchLegacy(MotorConflicts.Slot.SHADOW, value);
+                        },
                         opts -> opts.experimental.coloredShadows)
                 .setImpact(OptionImpact.LOW)
                 .setEnabled(!irisInstalled)
@@ -888,7 +1114,11 @@ public class SodiumGameOptionPages {
                         + "quando ligas a opção. Precisa de recarregar o renderizador.\n\n"
                         + "Com o Iris instalado fica desligado, porque o Iris controla o shader do mundo." + newIrisNote))
                 .setControl(TickBoxControl::new)
-                .setBinding((opts, value) -> opts.experimental.surfaceReflection = value,
+                .setBinding((opts, value) -> {
+                            opts.experimental.surfaceReflection = value;
+                            // Legacy side of the SHEEN slot.
+                            MotorConflicts.touchLegacy(MotorConflicts.Slot.SHEEN, value);
+                        },
                         opts -> opts.experimental.surfaceReflection)
                 .setImpact(OptionImpact.MEDIUM)
                 .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
@@ -950,7 +1180,15 @@ public class SodiumGameOptionPages {
                         Text.literal("No Effects").formatted(Formatting.GOLD),
                         Text.literal("Rethinking").formatted(Formatting.AQUA)
                 }))
-                .setBinding((opts, value) -> opts.experimental.makeupMode = value,
+                .setBinding((opts, value) -> {
+                            opts.experimental.makeupMode = value;
+                            // The MakeUp profile is the legacy driver of the GROUND (ground light)
+                            // and TONEMAP slots: enabling any profile stamps both so the Motor tab
+                            // loses them under last-wins until it is re-enabled afterwards.
+                            boolean profileActive = value != SodiumGameOptions.MakeupMode.OFF;
+                            MotorConflicts.touchLegacy(MotorConflicts.Slot.GROUND, profileActive);
+                            MotorConflicts.touchLegacy(MotorConflicts.Slot.TONEMAP, profileActive);
+                        },
                         opts -> opts.experimental.makeupMode == null
                                 ? SodiumGameOptions.MakeupMode.OFF
                                 : opts.experimental.makeupMode)
@@ -1007,7 +1245,11 @@ public class SodiumGameOptionPages {
                         + "O que afeta: só o terreno e a água. Não há cópia da cena, por isso a cor é uma "
                         + "aproximação do horizonte e não a cor desfocada por trás da água. Só no Overworld."))
                 .setControl(TickBoxControl::new)
-                .setBinding((opts, value) -> opts.experimental.makeupFog = value,
+                .setBinding((opts, value) -> {
+                            opts.experimental.makeupFog = value;
+                            // Legacy side of the FOG slot.
+                            MotorConflicts.touchLegacy(MotorConflicts.Slot.FOG, value);
+                        },
                         opts -> opts.experimental.makeupFog)
                 .setImpact(OptionImpact.LOW)
                 .setEnabled(!irisPack)
@@ -1146,6 +1388,28 @@ public class SodiumGameOptionPages {
                 .setImpact(OptionImpact.LOW)
                 .build();
 
+        Option<Boolean> profileEmissiveBlocks = OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                .setName(Text.literal("Minérios e metais emissivos"))
+                .setTooltip(Text.literal("Dá um brilho colorido suave aos minérios, blocos de metal/mineral e cristais que o "
+                        + "vanilla deixa completamente escuros: ferro, cobre, ouro, lápis, diamante, esmeralda, "
+                        + "redstone, quartzo, ametista, blocos de metal bruto e refinado, e as quatro fases do "
+                        + "cobre. Cada bloco emite a sua própria cor mineral, com um nível sintético baixo, por "
+                        + "isso lê-se como uma tinta suave e não como uma fonte de luz. O carvão fica de fora: a "
+                        + "cor dele é preta.\n\n"
+                        + "Como é barato: são apenas mais sementes no mesmo varrimento que a luz colorida já faz "
+                        + "— sem passagem extra, sem textura nova, sem uniform novo. Alimenta a grelha do perfil, "
+                        + "por isso só aparece onde a cor do chão está ligada. Desligado, o varrimento é idêntico "
+                        + "ao que considera só as fontes do vanilla."))
+                .setControl(TickBoxControl::new)
+                .setBinding((opts, value) -> {
+                    opts.experimental.emissiveBlocks = value;
+                    // The scan content changes, not the shader program: force the grid to rebuild
+                    // on the next tick so the glow appears/disappears immediately, without a reload.
+                    ColoredLighting.markDirty();
+                }, opts -> opts.experimental.emissiveBlocks)
+                .setImpact(OptionImpact.LOW)
+                .build();
+
         // The group header carries the profile colour, so the tab reads at a glance which model
         // is running: amber for No Effects, aqua for Rethinking, plain white when both are off.
         Text profileGroupName = switch (profileMode.getValue()) {
@@ -1158,6 +1422,7 @@ public class SodiumGameOptionPages {
                 .setName(profileGroupName)
                 .add(profileMode)
                 .add(new GatedOption<>(profileColoredLights, coloredLightsOn))
+                .add(new GatedOption<>(profileEmissiveBlocks, profileOn))
                 .add(new GatedOption<>(profileSky, profileOn))
                 .add(new GatedOption<>(profileFog, profileOn))
                 .add(new GatedOption<>(profileSunLight, profileOn))

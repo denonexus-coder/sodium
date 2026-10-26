@@ -165,7 +165,7 @@ public final class AnalyticLighting {
         candidateCount = 0;
 
         ColoredLighting.scanSources(world, minX, minY, minZ, maxX, maxY, maxZ, (state, x, y, z) -> {
-            int luminance = state.getLuminance();
+            int luminance = ColoredLighting.effectiveLuminance(state);
 
             if (luminance <= 0) {
                 return;
