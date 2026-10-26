@@ -84,13 +84,18 @@ void main() {
         normal = _makeup_water_normal(normal, v_MakeupWorldPos);
     }
 
-    float ndl = max(dot(normal, u_MakeupSunDirView), 0.0);
+    // MakeUp uses mix(-N·L, N·L, dayNightMix) so the moon (opposite of sun) shades correctly
+    // at night. Without this mix, night-time faces look flat because the moon is behind the sun.
+    float ndlRaw = dot(normal, u_MakeupSunDirView);
+    float ndl    = mix(-ndlRaw, ndlRaw, u_MakeupDayNightMix); // matches MakeUp's directLightStrength
+    float ndlPos = max(ndl, 0.0);
 
     // MakeUp's no-shadow direct term: the sun only reaches surfaces that see the sky, and the
     // ^10 ramp is what makes a roof, a cave or a north-facing wall lose the direct component
     // without a shadow map.
-    float directStrength = mix(0.0, ndl, pow(v_MakeupSky, 10.0)) * u_MakeupSun;
-    float omniStrength = ((ndl + 1.0) * 0.25) + 0.75;
+    float directStrength = mix(0.0, ndlPos, pow(v_MakeupSky, 10.0)) * u_MakeupSun;
+    // omniStrength uses the raw (pre-dayNight) dot like MakeUp's original formula
+    float omniStrength = ((ndlRaw + 1.0) * 0.25) + 0.75;
 
     // The omni and direct colours are uniforms, not varyings: both are constant for the frame,
     // and only visibleSky changes per vertex. This keeps the varying budget inside the GLES 3
@@ -109,21 +114,32 @@ void main() {
 
     diffuseColor.rgb *= light;
 
+    // Foliage / grass vibrance: boost green saturation proportionally to skylight.
+    // This recreates the vivid biome-tinted greens visible in MakeUp without a
+    // separate foliage pass — the vertex colour already carries the biome tint.
+    float greenDominance = diffuseColor.g - max(diffuseColor.r, diffuseColor.b);
+    if (greenDominance > 0.04) {
+        float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+        float satBoost = 1.0 + 0.22 * v_MakeupSky; // up to +22 % saturation in open sky
+        diffuseColor.rgb = clamp(mix(vec3(lum), diffuseColor.rgb, satBoost), 0.0, 1.0);
+    }
+
     if (water) {
-        // Sample MakeUp water texture for flow/wave data (RG format).
-        // Scale and animate UV coordinates to reveal caustics and subtle flow waves like MakeUp
-        vec2 waterUv1 = (v_MakeupWorldPos.xz * 0.125) + vec2(u_MakeupTime * 0.025, u_MakeupTime * 0.025);
-        vec2 waterUv2 = (v_MakeupWorldPos.xz * 0.08) - vec2(u_MakeupTime * 0.02, -u_MakeupTime * 0.015);
-        vec2 waterData1 = textureLod(u_MakeupWaterTex, waterUv1, 0.0).rg;
-        vec2 waterData2 = textureLod(u_MakeupWaterTex, waterUv2, 0.0).rg;
-        vec2 waterData = (waterData1 + waterData2) * 0.5;
-        
-        // Water absorption based on incident angle
-        float ndv = max(dot(normal, viewDir), 0.0);
-        float tint = clamp(u_MakeupWaterAbsorption * (1.0 - ndv * 0.5) * 3.5, 0.15, 0.85);
-        
-        // Caustics & depth coloration from RG texture channels
-        vec3 causticTint = vec3(waterData.g * 0.35 + waterData.r * 0.15);
+        // Three-layer animated water texture sampling matching MakeUp's normal_waves() UV layout.
+        // The RG channels of water_256_rg_8bit carry flow/foam (R) and depth/caustics (G).
+        vec2 waterUv1 = (v_MakeupWorldPos.xz * 0.05 ) + vec2( u_MakeupTime * 0.025,  u_MakeupTime * 0.025);
+        vec2 waterUv2 = (v_MakeupWorldPos.xz * 0.03125) - vec2( u_MakeupTime * 0.018,  u_MakeupTime * 0.018);
+        vec2 waterUv3 = (v_MakeupWorldPos.xz * 0.125) + vec2( u_MakeupTime * 0.030, -u_MakeupTime * 0.020);
+        vec2 waterData = (textureLod(u_MakeupWaterTex, waterUv1, 0.0).rg
+                        + textureLod(u_MakeupWaterTex, waterUv2, 0.0).rg
+                        + textureLod(u_MakeupWaterTex, waterUv3, 0.0).rg * 0.66) * 0.4;
+
+        // Angle-based absorption: shallower view = more tint (like MakeUp's WATER_ABSORPTION)
+        float ndv  = max(dot(normal, viewDir), 0.0);
+        float tint = clamp(u_MakeupWaterAbsorption * (1.0 - ndv * 0.5) * 3.5, 0.10, 0.85);
+
+        // Caustic glow from texture G channel, foam highlight from R
+        vec3 causticTint = vec3(waterData.g * 0.30 + waterData.r * 0.10);
         vec3 waterTextureColor = u_MakeupWaterColor + causticTint;
         diffuseColor.rgb = mix(diffuseColor.rgb, waterTextureColor, tint);
     }

@@ -1,11 +1,12 @@
 package me.jellysquid.mods.sodium.client.util;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
-import net.minecraft.client.texture.TextureManager;
 import net.minecraft.util.Identifier;
+import org.lwjgl.opengl.GL11C;
 
 import java.io.IOException;
 
@@ -54,29 +55,24 @@ public class TextureUtil {
     }
 
     private static int loadMakeupTexture(String name) {
-        TextureManager textureManager = MinecraftClient.getInstance().getTextureManager();
         Identifier id = new Identifier("sodium", "textures/makeup/" + name + ".png");
-        
-        // Check if already loaded
-        if (textureManager.getTexture(id) != null) {
-            return textureManager.getTexture(id).getGlId();
-        }
-        
-        // Load the texture
-        try {
-            NativeImage image = NativeImage.read(MinecraftClient.getInstance().getResourceManager().getResourceOrThrow(id).getInputStream());
-            int textureId = textureManager.getTexture(id).getGlId();
-            
-            // Upload the image data
-            RenderSystem.bindTexture(textureId);
-            image.upload(0, 0, 0, false);
-            
-            // Set texture parameters for water/cloud textures
-            RenderSystem.texParameter(3553, 10241, 9729); // GL_LINEAR min filter
-            RenderSystem.texParameter(3553, 10240, 9729); // GL_LINEAR mag filter
-            RenderSystem.texParameter(3553, 10242, 10497); // GL_REPEAT wrap S
-            RenderSystem.texParameter(3553, 10243, 10497); // GL_REPEAT wrap T
-            
+
+        // Generate and upload the texture directly. Asking the TextureManager for the GL id would
+        // return null here: the identifier is not registered with it, so getTexture(id) is null
+        // and the previous code threw a NullPointerException that the IOException catch did not
+        // handle, taking the whole profile down with it.
+        try (NativeImage image = NativeImage.read(MinecraftClient.getInstance().getResourceManager()
+                .getResourceOrThrow(id).getInputStream())) {
+            int textureId = GlStateManager._genTexture();
+            GlStateManager._bindTexture(textureId);
+
+            image.upload(0, 0, 0, false); // the try-with-resources below closes the image
+
+            RenderSystem.texParameter(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+            RenderSystem.texParameter(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+            RenderSystem.texParameter(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL11C.GL_REPEAT);
+            RenderSystem.texParameter(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL11C.GL_REPEAT);
+
             return textureId;
         } catch (IOException e) {
             SodiumClientMod.logger().error("Failed to load MakeUp texture: {}", name, e);

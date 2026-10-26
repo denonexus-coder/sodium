@@ -31,6 +31,7 @@ uniform float u_MakeupEyeSky;
 uniform float u_MakeupRain;
 uniform float u_MakeupFar;
 uniform float u_MakeupTime;
+uniform float u_MakeupDayNightMix;
 
 /** MakeUp's visibleSky: the lightmap's sky column, dead zone and all. */
 float _makeup_visible_sky(vec2 lightCoord) {
@@ -89,21 +90,28 @@ vec4 _makeup_fog(vec4 color, float dist, float visibleSky) {
     return vec4(mix(color.rgb, u_MakeupFogColor, clamp(f, 0.0, 1.0)), color.a);
 }
 
-/** Analytic waves: a normal perturbation, not displaced vertices. */
-vec3 _makeup_water_normal(vec3 normal, vec3 cameraPos) {
+/** Three-layer analytic waves matching MakeUp's normal_waves() — modulated by rain. */
+vec3 _makeup_water_normal(vec3 normal, vec3 worldPos) {
     if (u_MakeupWaterWaves < 0.5) {
         return normal;
     }
 
-    vec2 p = cameraPos.xz;
+    vec2 p = worldPos.xz;
     float t = u_MakeupTime;
 
-    float w1 = sin(p.x * 0.9 + t * 1.7) * cos(p.y * 0.8 - t * 1.3);
-    float w2 = sin((p.x + p.y) * 0.55 - t * 0.9);
+    // Layer 1 – primary long swell (matches MakeUp wave_1 scale ~0.05)
+    float w1 = sin(p.x * 0.9  + t * 1.7) * cos(p.y * 0.8  - t * 1.3);
+    // Layer 2 – secondary diagonal wave (matches wave_2 scale ~0.03125)
+    float w2 = sin((p.x + p.y) * 0.55 - t * 0.9) * 0.85;
+    // Layer 3 – high-frequency ripple (matches wave_3 scale ~0.125, weight 0.66)
+    float w3 = cos(p.x * 1.3  - t * 2.1) * sin(p.y * 1.1  + t * 1.5) * 0.66;
 
-    // The perturbation is in view space, like the normal. It does not need to match the world
-    // axes exactly: the waves are a noise pattern, and the lighting only needs a varying normal.
-    return normalize(normal + vec3(w1, w2, 0.0) * (0.35 * u_MakeupWaveStrength));
+    // Rain calms reflections but increases choppiness (turbulence blends toward 0.3 at full rain)
+    float turbulence = mix(0.9, 0.3, u_MakeupRain);
+
+    vec2 waveXZ = vec2(w1 + w3 * 0.5, w2 + w3 * 0.5) * turbulence;
+
+    return normalize(normal + vec3(waveXZ.x, waveXZ.y, 0.0) * (0.35 * u_MakeupWaveStrength));
 }
 
 /** A sky-coloured Fresnel reflection; no SSR, no second scene pass. */

@@ -6,7 +6,9 @@ import me.jellysquid.mods.sodium.client.render.chunk.lighting.ColoredLighting;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.DimensionEffects;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 
 /**
  * The palette and the toggles of the MakeUp "No Effects" profile.
@@ -155,6 +157,13 @@ public final class MakeupProfile {
         // A slight zenith component keeps the fog from becoming a flat wall of horizon colour.
         float[] fog = mix(horizon, zenith, 0.15F);
 
+        // Biome tint: the profile's fog is an ethereal horizon colour, which on its own flattens
+        // every biome into the same view. Mixing 30 % of the fog colour of the biome the camera
+        // stands in keeps a swamp green, a snowy taiga cold and a mesa warm, while the MakeUp
+        // gradient stays dominant. The biome carries its own temperature and humidity, so a warm
+        // humid biome reads differently from a cold dry one without any extra test here.
+        fog = mix(fog, biomeFogColor(world), 0.30F);
+
         float fogDensity = dayBlendFloat(2.0F, 3.0F, 3.0F, dayMoment, dayMixer, nightMixer) * 2.0F;
         float skyBrightness = MathHelper.clamp(
                 dayBlendFloat(0.25F, 1.0F, nightBright, dayMoment, dayMixer, nightMixer), 0.0F, 1.0F);
@@ -169,6 +178,12 @@ public final class MakeupProfile {
         // transition from looking like a light switch.
         float night = smooth(dayMoment, 0.50F, 0.54F) * (1.0F - smooth(dayMoment, 0.96F, 1.0F));
 
+        // dayNightMix = 1.0 at noon, 0.0 at midnight — same as MakeUp's dayNightMix uniform fed
+        // from Iris/Optifine. The shader uses it as mix(-N·L, N·L, dayNightMix) so that at night
+        // the moon (which is the opposite of the sun vector) shades faces correctly.
+        float dayNightMix = MathHelper.clamp(
+                MathHelper.cos(world.getSkyAngle(tickDelta) * 6.2831855F) * 2.0F + 0.5F, 0.0F, 1.0F);
+
         float fogFar = Math.max(32.0F,
                 MinecraftClient.getInstance().options.getViewDistance().getValue() * 16.0F);
 
@@ -176,6 +191,7 @@ public final class MakeupProfile {
                 omni, omniMin, directColor, candle, zenith, horizon, WATER, fog,
                 fogDensity, rain, skyBrightness, night,
                 sunX, sunY, sunZ,
+                dayNightMix,
                 settings.makeupSunLight,
                 settings.makeupWater,
                 settings.makeupWaterAbsorption / 100.0F,
@@ -207,6 +223,7 @@ public final class MakeupProfile {
             float sunX,
             float sunY,
             float sunZ,
+            float dayNightMix,
             boolean sunLight,
             boolean water,
             float waterAbsorption,
@@ -239,6 +256,19 @@ public final class MakeupProfile {
                 a[0] + (b[0] - a[0]) * t,
                 a[1] + (b[1] - a[1]) * t,
                 a[2] + (b[2] - a[2]) * t
+        };
+    }
+
+    /** The vanilla fog colour of the biome under the camera, as normalised RGB. */
+    private static float[] biomeFogColor(ClientWorld world) {
+        Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
+        int color = world.getBiome(BlockPos.ofFloored(cameraPos.x, cameraPos.y, cameraPos.z))
+                .value().getFogColor();
+
+        return new float[] {
+                ((color >> 16) & 0xFF) / 255.0F,
+                ((color >> 8) & 0xFF) / 255.0F,
+                (color & 0xFF) / 255.0F
         };
     }
 

@@ -16,6 +16,9 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public class BackgroundRendererMixin {
     @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/CubicSampler;sampleColor(Lnet/minecraft/util/math/Vec3d;Lnet/minecraft/util/CubicSampler$RgbFetcher;)Lnet/minecraft/util/math/Vec3d;"))
     private static Vec3d redirectSampleColor(Vec3d pos, CubicSampler.RgbFetcher rgbFetcher, Camera camera, float tickDelta, ClientWorld world, int i, float f) {
+        // The profile's fog colour already carries the 30 % biome tint (see MakeupProfile), so the
+        // sky, the chunk fog and the background all agree on the same colour instead of the
+        // background being tinted twice.
         if (MakeupProfile.isFogActive()) {
             float[] fog = MakeupProfile.frame(world, tickDelta).fogColor();
 

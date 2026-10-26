@@ -88,6 +88,7 @@ public class ChunkShaderInterface {
     private final GlUniformFloat uniformMakeupRain;
     private final GlUniformFloat uniformMakeupFar;
     private final GlUniformFloat uniformMakeupTime;
+    private final GlUniformFloat uniformMakeupDayNightMix;
 
     private MakeupProfile.Frame makeupFrame;
 
@@ -184,6 +185,7 @@ public class ChunkShaderInterface {
             this.uniformMakeupRain = context.bindUniform("u_MakeupRain", GlUniformFloat::new);
             this.uniformMakeupFar = context.bindUniform("u_MakeupFar", GlUniformFloat::new);
             this.uniformMakeupTime = context.bindUniform("u_MakeupTime", GlUniformFloat::new);
+            this.uniformMakeupDayNightMix = context.bindUniform("u_MakeupDayNightMix", GlUniformFloat::new);
         } else {
             this.uniformMakeupOmniColor = null;
             this.uniformMakeupOmniMin = null;
@@ -208,6 +210,7 @@ public class ChunkShaderInterface {
             this.uniformMakeupRain = null;
             this.uniformMakeupFar = null;
             this.uniformMakeupTime = null;
+            this.uniformMakeupDayNightMix = null;
         }
 
         // The MakeUp profile samples the same grid for the colour of the sources placed in the
@@ -317,6 +320,7 @@ public class ChunkShaderInterface {
             this.uniformMakeupEyeSky.setFloat(frame.eyeSky());
             this.uniformMakeupRain.setFloat(frame.rain());
             this.uniformMakeupFar.setFloat(frame.fogFar());
+            this.uniformMakeupDayNightMix.setFloat(frame.dayNightMix());
 
             MinecraftClient client = MinecraftClient.getInstance();
             this.uniformMakeupTime.setFloat((client.world.getTime() + client.getTickDelta()) * 0.05F);
