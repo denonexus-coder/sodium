@@ -101,7 +101,6 @@ public class ChunkShaderInterface {
     private final GlUniformInt uniformMotorBTex;
     private final GlUniformFloat3v uniformMotorBOrigin;
     private final GlUniformFloat3v uniformMotorBScale;
-    private final GlUniformFloat3v uniformMotorBCamera;
     private final GlUniformFloat uniformMotorBStrength;
     private final GlUniformFloat uniformMotorBCeiling;
 
@@ -196,14 +195,12 @@ public class ChunkShaderInterface {
             this.uniformMotorBTex = context.bindUniform("u_MotorBTex", GlUniformInt::new);
             this.uniformMotorBOrigin = context.bindUniform("u_MotorBOrigin", GlUniformFloat3v::new);
             this.uniformMotorBScale = context.bindUniform("u_MotorBScale", GlUniformFloat3v::new);
-            this.uniformMotorBCamera = context.bindUniform("u_MotorBCamera", GlUniformFloat3v::new);
             this.uniformMotorBStrength = context.bindUniform("u_MotorBStrength", GlUniformFloat::new);
             this.uniformMotorBCeiling = context.bindUniform("u_MotorBCeiling", GlUniformFloat::new);
         } else {
             this.uniformMotorBTex = null;
             this.uniformMotorBOrigin = null;
             this.uniformMotorBScale = null;
-            this.uniformMotorBCamera = null;
             this.uniformMotorBStrength = null;
             this.uniformMotorBCeiling = null;
         }
@@ -352,10 +349,6 @@ public class ChunkShaderInterface {
                     ColoredLighting.getMotorBScaleX(),
                     ColoredLighting.getMotorBScaleY(),
                     ColoredLighting.getMotorBScaleZ());
-
-            // The vertex shader turns the chunk vertex into camera-relative world space so the
-            // fragment can derive the face normal from the position derivatives.
-            this.uniformMotorBCamera.set((float) cameraPos.x, (float) cameraPos.y, (float) cameraPos.z);
 
             var motorB = SodiumClientMod.options().motorB;
             this.uniformMotorBStrength.setFloat(percent(motorB.directionalStrength));

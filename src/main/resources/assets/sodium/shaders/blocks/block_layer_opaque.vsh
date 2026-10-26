@@ -45,9 +45,10 @@ out float v_MaterialTranslucent;
 
 // Motor B carries the camera-relative world position so the fragment stage can derive the face
 // normal and pick which of the six directions of the field this surface shows to the light.
+// It is the same space the vertex already uses (the region offset is relative to the camera),
+// which is also the space u_MotorBOrigin is uploaded in.
 #ifdef MOTOR_B
 out vec3 v_MotorBWorldPos;
-uniform vec3 u_MotorBCamera;
 #endif
 
 // ── Motor single-pass engine ─────────────────────────────────────────────────
@@ -288,8 +289,8 @@ void main() {
     vec3 position = _vert_position + translation + a_InstanceOffset;
 
 #ifdef MOTOR_B
-    // Camera-relative world space, the same space the six-axis atlas is uploaded in.
-    v_MotorBWorldPos = position + u_MotorBCamera;
+    // Camera-relative world space, the same space u_MotorBOrigin is uploaded in.
+    v_MotorBWorldPos = position;
 #endif
 
 #ifdef USE_FOG
