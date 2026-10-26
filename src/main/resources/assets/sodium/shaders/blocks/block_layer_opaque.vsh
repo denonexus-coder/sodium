@@ -43,9 +43,33 @@ out float v_MaterialWater;
 out float v_MaterialTranslucent;
 #endif
 
+// ── Motor single-pass engine ─────────────────────────────────────────────────
+// Every Motor varying lives under MOTOR_ENABLED, so with the engine off (none of the defines
+// present) not one extra out slot is emitted and the program matches the stock shader. The
+// values are cheap per-vertex data the fragment stage needs: the view position (sheen Fresnel
+// and a derived face normal), the absolute world height (shadow depth tint) and the raw lightmap
+// coord (shadow occlusion). The clustered grid colour is sampled here, where _colored_grid and
+// the atlas uniforms already live, and handed down as a varying -- there is no second sampler in
+// the fragment stage.
+#ifdef MOTOR_ENABLED
+out vec3 v_MotorViewPos;
+out float v_MotorWorldY;
+out vec2 v_MotorLightCoord;
+#if defined(MOTOR_GRID) && !defined(ANALYTIC_LIGHTING) && (defined(COLORED_LIGHTING) || defined(MAKEUP_COLORED_LIGHTS))
+out vec3 v_MotorGrid;
+#endif
+#endif
+
 uniform int u_FogShape;
 uniform vec3 u_RegionOffset;
 uniform vec2 u_TexCoordShrink;
+
+// Motor shadow needs the absolute world height to drive its depth tint. It carries its own
+// camera-Y uniform so it never collides with the colored path's u_CameraY, which is only present
+// under COLORED_LIGHTING.
+#ifdef MOTOR_SHADOW
+uniform float u_MotorCameraY;
+#endif
 
 uniform sampler2D u_LightTex; // The light map texture sampler
 
@@ -307,5 +331,33 @@ void main() {
     v_MaterialMipBias = _material_mip_bias(_material_params);
 #ifdef USE_FRAGMENT_DISCARD
     v_MaterialAlphaCutoff = _material_alpha_cutoff(_material_params);
+#endif
+
+#ifdef MOTOR_ENABLED
+    // Camera-relative view position; the fragment stage derives a flat face normal from its
+    // screen-space derivatives, so no normal attribute is added to the chunk vertex format.
+    v_MotorViewPos = (u_ModelViewMatrix * vec4(position, 1.0)).xyz;
+    v_MotorLightCoord = _vert_tex_light_coord;
+    #ifdef MOTOR_SHADOW
+        v_MotorWorldY = position.y + u_MotorCameraY;
+    #else
+        v_MotorWorldY = position.y;
+    #endif
+    #if defined(MOTOR_GRID) && !defined(ANALYTIC_LIGHTING) && (defined(COLORED_LIGHTING) || defined(MAKEUP_COLORED_LIGHTS))
+        // Honest limitation: the clustered grid reuses the colored-light atlas. When no atlas is
+        // present the branch is not compiled and the grid is a no-op.
+        #ifdef MOTOR_GRID_LOD
+            // Grid LOD: positions are camera-relative, so skip the atlas sample past a distance
+            // budget. Far terrain keeps vanilla warmth instead of paying for the lookup; there is
+            // no visible loss up close where the grid light actually matters.
+            if (dot(position, position) < (96.0 * 96.0)) {
+                v_MotorGrid = _colored_grid(position);
+            } else {
+                v_MotorGrid = vec3(0.0);
+            }
+        #else
+            v_MotorGrid = _colored_grid(position);
+        #endif
+    #endif
 #endif
 }

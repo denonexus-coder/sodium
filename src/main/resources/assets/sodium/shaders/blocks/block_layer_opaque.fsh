@@ -35,6 +35,25 @@ uniform sampler2D u_MakeupWaterTex;
 
 uniform sampler2D u_BlockTex; // The block texture
 
+// ── Motor single-pass engine ─────────────────────────────────────────────────
+// All inputs live under MOTOR_ENABLED; with the engine off the fragment stage receives nothing
+// extra. The sliders arrive as uniforms that only exist when their own body is compiled in.
+#ifdef MOTOR_ENABLED
+in vec3 v_MotorViewPos;
+in float v_MotorWorldY;
+in vec2 v_MotorLightCoord;
+#if defined(MOTOR_GRID) && !defined(ANALYTIC_LIGHTING) && (defined(COLORED_LIGHTING) || defined(MAKEUP_COLORED_LIGHTS))
+in vec3 v_MotorGrid;
+#endif
+#ifdef MOTOR_SHADOW
+uniform float u_MotorShadowStrength;
+#endif
+#ifdef MOTOR_SHEEN
+uniform float u_MotorSheenStrength;
+uniform float u_MotorSheenSoftness;
+#endif
+#endif
+
 uniform vec4 u_FogColor; // The color of the shader fog
 uniform float u_FogStart; // The starting position of the shader fog
 uniform float u_FogEnd; // The ending position of the shader fog
@@ -55,6 +74,15 @@ void main() {
     vec3 makeupViewDir = normalize(-v_MakeupViewPos);
     vec3 makeupNormal = normalize(cross(dFdx(v_MakeupViewPos), dFdy(v_MakeupViewPos)));
     makeupNormal = faceforward(makeupNormal, -makeupViewDir, makeupNormal);
+#endif
+
+#ifdef MOTOR_ENABLED
+    // Flat face normal from screen-space derivatives (same trick the reflection/profile use),
+    // computed BEFORE the cutout discard: derivatives after a non-uniform discard are undefined,
+    // and the cutout pass (leaves/plants) would otherwise feed the sheen garbage normals.
+    vec3 motorViewDir = normalize(-v_MotorViewPos);
+    vec3 motorNormal = normalize(cross(dFdx(v_MotorViewPos), dFdy(v_MotorViewPos)));
+    motorNormal = faceforward(motorNormal, -motorViewDir, motorNormal);
 #endif
 
 #ifdef USE_FRAGMENT_DISCARD
@@ -165,6 +193,78 @@ void main() {
     }
 #endif
 
+#ifdef MOTOR_ENABLED
+    // --- Motor single-pass engine (additive; each block exists only when its define is set) ---
+    // The engine reuses the diffuseColor the legacy paths produced. Where Motor owns a slot the
+    // legacy effect for that slot was already suppressed at compile time by the last-wins
+    // resolve, so these blocks never stack on the same legacy effect. HONEST SCOPE: single-pass,
+    // so no real shadow map / SSR / volumetric -- the shadow, sheen, fog and shafts below are
+    // ALU approximations, and the grid piggybacks on the colored-light atlas. motorNormal /
+    // motorViewDir were derived above (before the cutout discard).
+
+#if defined(MOTOR_GRID) && !defined(ANALYTIC_LIGHTING) && (defined(COLORED_LIGHTING) || defined(MAKEUP_COLORED_LIGHTS))
+    // Clustered grid as a light: add the grid colour gated by the vanilla block-light column so
+    // it never leaks through walls. Approximation of clustered-forward that reuses the atlas the
+    // user already builds, not a real per-cluster light list.
+    {
+        float gate = smoothstep(0.0, 0.08, v_MotorLightCoord.x);
+        diffuseColor.rgb += v_MotorGrid * gate * 0.35;
+    }
+#endif
+
+#ifdef MOTOR_SHADOW
+    if (u_MotorShadowStrength > 0.0) {
+        // Tinted analytic shadow: the ambient light is TINTED (not greyed) where the surface is
+        // occluded from the sky, inferred from the vanilla lightmap plus a height term. No
+        // shadow map and no extra pass.
+        float skyLight = clamp(v_MotorLightCoord.y, 0.0, 1.0);
+        float blockLight = clamp(v_MotorLightCoord.x, 0.0, 1.0);
+        float occlusion = (1.0 - smoothstep(0.0, 0.90, skyLight))
+                * (1.0 - 0.60 * smoothstep(0.0, 0.85, blockLight));
+
+        float depth = 1.0 - smoothstep(20.0, 110.0, v_MotorWorldY);
+        // Day -> cool blue tint; deep/low -> violet tint. Never a flat grey darkening.
+        vec3 shade = mix(vec3(0.72, 0.82, 1.00), vec3(0.48, 0.38, 0.68), depth);
+
+        float amount = clamp(u_MotorShadowStrength * occlusion, 0.0, 1.0);
+        diffuseColor.rgb *= mix(vec3(1.0), shade, amount);
+        diffuseColor.rgb *= 1.0 - amount * 0.18;
+    }
+#endif
+
+#ifdef MOTOR_SHEEN
+    if (u_MotorSheenStrength > 0.0) {
+        // Cheap metallic/Fresnel sheen: a view-dependent white rim, no SSR and no reflection
+        // probe. Cost is one pow() per fragment.
+        float fresnel = pow(clamp(1.0 - max(dot(motorNormal, motorViewDir), 0.0), 0.0, 1.0),
+                u_MotorSheenSoftness);
+        diffuseColor.rgb += fresnel * u_MotorSheenStrength * 0.25;
+    }
+#endif
+
+#ifdef MOTOR_FOG
+    {
+        // Analytic height/distance fog tint folded into the fragment. The standard linear fog
+        // still runs below; this only adds a height-aware colour shift so low, distant terrain
+        // takes the horizon colour sooner. Approximation, not a scattering integral.
+        float d = clamp(v_FragDistance / max(u_FogEnd, 1.0), 0.0, 1.0);
+        float heightFade = 1.0 - smoothstep(60.0, 140.0, v_MotorWorldY);
+        float amount = d * d * mix(0.25, 0.6, heightFade);
+        diffuseColor.rgb = mix(diffuseColor.rgb, u_FogColor.rgb, amount);
+    }
+#endif
+
+#ifdef MOTOR_SHAFTS
+    {
+        // Light-shafts approximation: a soft brightening that grows with distance, tinted by the
+        // fog colour. NOT volumetric scattering -- a per-fragment god-ray-like cue that costs a
+        // single smoothstep.
+        float shaft = smoothstep(0.0, u_FogEnd, v_FragDistance) * 0.12;
+        diffuseColor.rgb += u_FogColor.rgb * shaft;
+    }
+#endif
+#endif
+
 #ifdef MAKEUP_NO_EFFECTS
     if (u_MakeupFog > 0.5) {
         fragColor = _makeup_fog(diffuseColor, v_FragDistance, v_MakeupSky);
@@ -176,5 +276,13 @@ void main() {
     }
 #else
     fragColor = _linearFog(diffuseColor, v_FragDistance, u_FogColor, u_FogStart, u_FogEnd);
+#endif
+
+#ifdef MOTOR_TONEMAP
+    // Tonemap / colour grading folded into the output. A cheap Reinhard-ish curve with a slight
+    // contrast lift, done in-place with no extra render target. Approximation of a grading pass,
+    // applied last so it sees the fully composited, fogged fragment.
+    fragColor.rgb = (fragColor.rgb / (fragColor.rgb + vec3(0.155))) * 1.155;
+    fragColor.rgb = pow(clamp(fragColor.rgb, 0.0, 1.0), vec3(0.9));
 #endif
 }

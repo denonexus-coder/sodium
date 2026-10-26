@@ -26,6 +26,7 @@ public class SodiumGameOptions {
     public final PerformanceSettings performance = new PerformanceSettings();
     public final VisualSettings visual = new VisualSettings();
     public final ExperimentalSettings experimental = new ExperimentalSettings();
+    public final MotorSettings motor = new MotorSettings();
     public final NotificationSettings notifications = new NotificationSettings();
 
     private boolean readOnly;
@@ -197,11 +198,75 @@ public class SodiumGameOptions {
 
         /** The profile's directional sun without a shadow map; the grass is lit by N·L. */
         public boolean makeupSunLight = true;
+
+        /**
+         * Gives ores, raw/refined metal blocks and crystals a faint coloured glow of their own
+         * mineral hue, even though vanilla leaves them completely dark. It is pure extra data for
+         * the colored-light scan — no extra pass, texture or uniform — and it feeds both engines,
+         * the Rethinking transport and the MakeUp profile grid. Off = the scan is byte-for-byte
+         * the vanilla-emitter-only scan.
+         */
+        public boolean emissiveBlocks = true;
+    }
+
+    /**
+     * The "Motor" engine: a new, fully optional single-pass lighting path that lives on its own
+     * GUI tab. Every field here defaults to off/neutral, so with the whole tab disabled the game
+     * renders byte-for-byte as it does today. The features are additive and independent; where a
+     * Motor feature drives the same visual slot as an older option (ambient shadow, sheen, fog,
+     * ground light, tonemap) the conflict is resolved last-wins via {@link MotorConflicts}: the
+     * most recently enabled side wins and the other is suppressed for that frame, while both keep
+     * their checkbox state. Non-conflicting features (grid LOD, light shafts) also benefit the
+     * MakeUp profiles when a profile is active.
+     */
+    public static class MotorSettings {
+        /** Master switch for the whole tab. Off = none of the fields below have any effect. */
+        public boolean enabled = false;
+
+        /** Tinted analytic shadow (sky occlusion + AO + N·sunDir), no shadow map. SHADOW slot. */
+        public boolean analyticShadow = false;
+        /** Voxel grid as the main light (clustered-forward equivalent). GROUND slot. */
+        public boolean clusteredGrid = false;
+        /** Cheap metallic/Fresnel sheen, no SSR. SHEEN slot. */
+        public boolean metallicSheen = false;
+        /** Analytic distance/height fog folded into the fragment. FOG slot. */
+        public boolean inlineFog = false;
+        /** Tonemap / colour grading folded into the fragment output. TONEMAP slot. */
+        public boolean inlineTonemap = false;
+
+        /** Non-conflicting optimisation: grid resolution drops with distance. Benefits profiles. */
+        public boolean gridLod = false;
+        /** Non-conflicting, off by default: cheap screen-space light shafts approximation. */
+        public boolean lightShafts = false;
+
+        /** 0..100. Strength of the analytic shadow darkening. Neutral when the feature is off. */
+        public int shadowStrength = 50;
+        /** 0..100. Strength of the metallic/Fresnel sheen. */
+        public int sheenStrength = 35;
+        /** 0..100. Fresnel exponent for the sheen; higher keeps it to grazing angles. */
+        public int sheenSoftness = 50;
+
+        /**
+         * Monotonic clock and per-slot timestamps used by the last-wins resolver. They are plain
+         * numbers so they survive a config round-trip; {@link MotorConflicts} compares the two
+         * contenders of each slot and lets the higher (more recent) one win. 0 means "never
+         * toggled on in this profile", which loses to any real timestamp.
+         */
+        public long conflictClock = 0;
+        public long stampMotorShadow = 0;
+        public long stampMotorSheen = 0;
+        public long stampMotorFog = 0;
+        public long stampMotorGround = 0;
+        public long stampMotorTonemap = 0;
+        public long stampLegacyShadow = 0;
+        public long stampLegacySheen = 0;
+        public long stampLegacyFog = 0;
+        public long stampLegacyGround = 0;
+        public long stampLegacyTonemap = 0;
     }
 
     /** The two profiles the chunk shader can build; they are mutually exclusive. */
-    public enum MakeupMode {
-        /** Plain Sodium. */
+    public enum MakeupMode {        /** Plain Sodium. */
         OFF,
         /** The MakeUp No Effects palette, fog, water and sky. */
         NO_EFFECTS,

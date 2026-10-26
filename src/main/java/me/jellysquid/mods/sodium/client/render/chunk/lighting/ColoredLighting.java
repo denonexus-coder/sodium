@@ -223,6 +223,90 @@ public final class ColoredLighting {
         COLORS.put(Blocks.SMALL_AMETHYST_BUD, amethystSmall);
     }
 
+    /**
+     * Blocks that vanilla leaves completely dark (luminance 0) but that should still cast a faint
+     * coloured glow of their mineral/metal hue: ores embedded in stone, raw-metal and mineral
+     * blocks, and crystals. This is purely additive data for the same scan the real emitters use
+     * — no extra pass, no extra texture, no extra uniform. When the feature is off
+     * ({@link #emissiveEnabled()} is false) the table is never consulted, so the default path pays
+     * nothing.
+     *
+     * <p>The emission is deliberately subtle: the synthetic level in {@link #EMISSIVE_LEVEL} feeds
+     * the same {@link #lightStrength(int)} curve as a real source, and the levels sit well below a
+     * torch so an ore wall reads as a soft tint, not a light source. Coal is intentionally absent:
+     * its hue is black, which is the absence of light.
+     */
+    private static final Map<Block, float[]> EMISSIVE = new HashMap<>();
+
+    /** The synthetic luminance (1..15) used for the emissive-only blocks in {@link #EMISSIVE}. */
+    private static final Map<Block, Integer> EMISSIVE_LEVEL = new HashMap<>();
+
+    private static void emissive(Block block, int hex, int level) {
+        EMISSIVE.put(block, rgb(hex));
+        EMISSIVE_LEVEL.put(block, level);
+    }
+
+    static {
+        // ---- Ores embedded in stone/deepslate/netherrack ---------------------------------
+        emissive(Blocks.IRON_ORE, 0xD8C0A8, 3);
+        emissive(Blocks.DEEPSLATE_IRON_ORE, 0xD8C0A8, 3);
+        emissive(Blocks.COPPER_ORE, 0xE0804D, 3);
+        emissive(Blocks.DEEPSLATE_COPPER_ORE, 0xE0804D, 3);
+        emissive(Blocks.GOLD_ORE, 0xFFD94C, 4);
+        emissive(Blocks.DEEPSLATE_GOLD_ORE, 0xFFD94C, 4);
+        emissive(Blocks.NETHER_GOLD_ORE, 0xFFC94C, 4);
+        emissive(Blocks.LAPIS_ORE, 0x2A5CE0, 4);
+        emissive(Blocks.DEEPSLATE_LAPIS_ORE, 0x2A5CE0, 4);
+        emissive(Blocks.DIAMOND_ORE, 0x4AEDD9, 5);
+        emissive(Blocks.DEEPSLATE_DIAMOND_ORE, 0x4AEDD9, 5);
+        emissive(Blocks.EMERALD_ORE, 0x3CE07A, 5);
+        emissive(Blocks.DEEPSLATE_EMERALD_ORE, 0x3CE07A, 5);
+        emissive(Blocks.NETHER_QUARTZ_ORE, 0xEDE6DE, 3);
+        emissive(Blocks.ANCIENT_DEBRIS, 0x8A5A4A, 3);
+        // Redstone ore already has a palette colour (COLORS); it only emits in vanilla while
+        // activated. Giving it an idle synthetic level lets the unactivated ore glow faint red
+        // too. No EMISSIVE colour entry is needed: colorFor() finds it in COLORS first.
+        EMISSIVE_LEVEL.put(Blocks.REDSTONE_ORE, 4);
+        EMISSIVE_LEVEL.put(Blocks.DEEPSLATE_REDSTONE_ORE, 4);
+
+        // ---- Raw-metal blocks ------------------------------------------------------------
+        emissive(Blocks.RAW_IRON_BLOCK, 0xD8B48C, 3);
+        emissive(Blocks.RAW_COPPER_BLOCK, 0xC9663D, 3);
+        emissive(Blocks.RAW_GOLD_BLOCK, 0xF0C64A, 4);
+
+        // ---- Refined mineral/metal blocks ------------------------------------------------
+        emissive(Blocks.IRON_BLOCK, 0xE8E8E8, 4);
+        emissive(Blocks.GOLD_BLOCK, 0xFFE34D, 6);
+        emissive(Blocks.DIAMOND_BLOCK, 0x5AF0DC, 7);
+        emissive(Blocks.EMERALD_BLOCK, 0x3CE07A, 7);
+        emissive(Blocks.LAPIS_BLOCK, 0x2A5CE0, 5);
+        emissive(Blocks.REDSTONE_BLOCK, 0xFF3030, 5);
+        emissive(Blocks.NETHERITE_BLOCK, 0x6A5A5A, 2);
+
+        // ---- Copper block family (oxidation + cut + waxed) -------------------------------
+        int[] copperHues = { 0xE0804D, 0xB88A5A, 0x7FA07A, 0x5AA587 };
+        Block[][] copperTiers = {
+                { Blocks.COPPER_BLOCK, Blocks.CUT_COPPER, Blocks.WAXED_COPPER_BLOCK, Blocks.WAXED_CUT_COPPER },
+                { Blocks.EXPOSED_COPPER, Blocks.EXPOSED_CUT_COPPER, Blocks.WAXED_EXPOSED_COPPER, Blocks.WAXED_EXPOSED_CUT_COPPER },
+                { Blocks.WEATHERED_COPPER, Blocks.WEATHERED_CUT_COPPER, Blocks.WAXED_WEATHERED_COPPER, Blocks.WAXED_WEATHERED_CUT_COPPER },
+                { Blocks.OXIDIZED_COPPER, Blocks.OXIDIZED_CUT_COPPER, Blocks.WAXED_OXIDIZED_COPPER, Blocks.WAXED_OXIDIZED_CUT_COPPER }
+        };
+        for (int tier = 0; tier < copperTiers.length; tier++) {
+            for (Block block : copperTiers[tier]) {
+                emissive(block, copperHues[tier], 4);
+            }
+        }
+
+        // ---- Quartz and crystals ---------------------------------------------------------
+        emissive(Blocks.QUARTZ_BLOCK, 0xF2EDE4, 3);
+        emissive(Blocks.SMOOTH_QUARTZ, 0xF2EDE4, 3);
+        emissive(Blocks.CHISELED_QUARTZ_BLOCK, 0xF2EDE4, 3);
+        emissive(Blocks.QUARTZ_PILLAR, 0xF2EDE4, 3);
+        emissive(Blocks.QUARTZ_BRICKS, 0xF2EDE4, 3);
+        emissive(Blocks.AMETHYST_BLOCK, 0xC9A6F0, 5);
+        emissive(Blocks.BUDDING_AMETHYST, 0xC9A6F0, 5);
+    }
+
     // ---- Grid engine state ----------------------------------------------------------------
 
     private static final float[] GRID = new float[CELLS * 3];
@@ -565,7 +649,7 @@ public final class ColoredLighting {
 
         scanSources(world, ox, oy, oz, ox + SIZE_X - 1, oy + SIZE_Y - 1, oz + SIZE_Z - 1,
                 (state, x, y, z) -> {
-                    int luminance = state.getLuminance();
+                    int luminance = effectiveLuminance(state);
 
                     if (luminance <= 0) {
                         return;
@@ -798,6 +882,9 @@ public final class ColoredLighting {
      */
     static void scanSources(ClientWorld world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ,
                             BlockConsumer consumer) {
+        // Resolved once per scan so the per-section palette test stays a cheap captured boolean.
+        final boolean scanEmissive = emissiveEnabled();
+
         int minChunkX = minX >> 4;
         int maxChunkX = maxX >> 4;
         int minChunkZ = minZ >> 4;
@@ -832,7 +919,8 @@ public final class ColoredLighting {
                         continue;
                     }
 
-                    if (!section.hasAny(state -> state.getLuminance() > 0)) {
+                    if (!section.hasAny(state -> state.getLuminance() > 0
+                            || (scanEmissive && EMISSIVE.containsKey(state.getBlock())))) {
                         continue;
                     }
 
@@ -848,7 +936,7 @@ public final class ColoredLighting {
 
                         BlockState state = section.getBlockState(x, y, z);
 
-                        if (state.getLuminance() <= 0) {
+                        if (effectiveLuminance(state) <= 0) {
                             continue;
                         }
 
@@ -1172,10 +1260,11 @@ public final class ColoredLighting {
 
                     pos.set(ox + x, worldY, worldZ);
                     BlockState state = world.getBlockState(pos);
-                    int luminance = state.getLuminance();
+                    int luminance = effectiveLuminance(state);
 
                     // RV checks `emissive` before `full`, so a glowstone or a sea lantern passes
-                    // light even though its shape is a full cube.
+                    // light even though its shape is a full cube. Emissive ores/metals glow the
+                    // same way: effectiveLuminance() gives them a synthetic level here too.
                     if (luminance > 0) {
                         FACE_MASK[index] = FULL_MASK;
                         addRethinkingSource(world, pos, state, index, x, y, z, luminance);
@@ -1436,6 +1525,39 @@ public final class ColoredLighting {
         return 0.55F + (0.45F * luminance / 15.0F);
     }
 
+    /**
+     * Whether the faint emissive glow for ores, mineral/metal blocks and crystals is enabled.
+     * Reads the "Luz Avançada" toggle; when off, {@link #effectiveLuminance(BlockState)} never
+     * consults the emissive table, so the scan is identical to the vanilla-emitter-only scan.
+     */
+    public static boolean emissiveEnabled() {
+        SodiumGameOptions options = SodiumClientMod.options();
+
+        return options != null && options.experimental.emissiveBlocks;
+    }
+
+    /**
+     * The luminance the light scan should treat a block as having. For a real vanilla source this
+     * is its own luminance; for a block in {@link #EMISSIVE} (ore, raw/refined metal, crystal) it
+     * is the synthetic level, but only while the feature is enabled. Both engines and the profile
+     * grid go through this single helper so the emissive blocks behave identically everywhere.
+     */
+    static int effectiveLuminance(BlockState state) {
+        int luminance = state.getLuminance();
+
+        if (luminance > 0) {
+            return luminance;
+        }
+
+        if (!emissiveEnabled()) {
+            return 0;
+        }
+
+        Integer synthetic = EMISSIVE_LEVEL.get(state.getBlock());
+
+        return synthetic == null ? 0 : synthetic;
+    }
+
     private static float[] rgb(int hex) {
         return new float[] {
                 ((hex >> 16) & 0xFF) / 255.0F,
@@ -1449,9 +1571,17 @@ public final class ColoredLighting {
         float[] color = (rethinking ? RV_COLORS : COLORS).get(block);
 
         if (color == null) {
-            color = block instanceof AbstractCandleBlock
-                    ? (rethinking ? RV_CANDLE : CANDLE)
-                    : (rethinking ? RV_NEUTRAL : NEUTRAL);
+            // An emissive-only block (ore/metal/crystal) carries its mineral hue in both modes;
+            // the palette does not change the colour of a chunk of gold.
+            float[] emissive = EMISSIVE.get(block);
+
+            if (emissive != null) {
+                color = emissive;
+            } else {
+                color = block instanceof AbstractCandleBlock
+                        ? (rethinking ? RV_CANDLE : CANDLE)
+                        : (rethinking ? RV_NEUTRAL : NEUTRAL);
+            }
         }
 
         return color;

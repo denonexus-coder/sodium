@@ -63,6 +63,13 @@ public class ChunkShaderInterface {
     private final GlUniformFloat uniformReflectionStrength;
     private final GlUniformFloat uniformReflectionSoftness;
 
+    // The Motor single-pass engine. Each uniform exists only when its own body is compiled in;
+    // with the engine off they are all null and nothing is uploaded.
+    private final GlUniformFloat uniformMotorShadowStrength;
+    private final GlUniformFloat uniformMotorCameraY;
+    private final GlUniformFloat uniformMotorSheenStrength;
+    private final GlUniformFloat uniformMotorSheenSoftness;
+
     // The MakeUp "No Effects" profile. The colors are computed once per pass on the CPU; the
     // fragment shader only needs the derivative normal and the light it already interpolates.
     private final GlUniformFloat3v uniformMakeupOmniColor;
@@ -152,6 +159,25 @@ public class ChunkShaderInterface {
         } else {
             this.uniformReflectionStrength = null;
             this.uniformReflectionSoftness = null;
+        }
+
+        // Motor shadow needs its own strength and the camera Y (to read absolute world height for
+        // the depth tint). It has a dedicated u_MotorCameraY so it never collides with the colored
+        // path's u_CameraY, which is bound under a different condition.
+        if (options.motor().shadow()) {
+            this.uniformMotorShadowStrength = context.bindUniform("u_MotorShadowStrength", GlUniformFloat::new);
+            this.uniformMotorCameraY = context.bindUniform("u_MotorCameraY", GlUniformFloat::new);
+        } else {
+            this.uniformMotorShadowStrength = null;
+            this.uniformMotorCameraY = null;
+        }
+
+        if (options.motor().sheen()) {
+            this.uniformMotorSheenStrength = context.bindUniform("u_MotorSheenStrength", GlUniformFloat::new);
+            this.uniformMotorSheenSoftness = context.bindUniform("u_MotorSheenSoftness", GlUniformFloat::new);
+        } else {
+            this.uniformMotorSheenStrength = null;
+            this.uniformMotorSheenSoftness = null;
         }
 
         if (options.makeupProfile()) {
@@ -337,6 +363,23 @@ public class ChunkShaderInterface {
 
             this.uniformReflectionStrength.setFloat(enabled ? percent(experimental.reflectionStrength) : 0.0F);
             this.uniformReflectionSoftness.setFloat(2.0F + 14.0F * percent(experimental.reflectionSoftness));
+        }
+
+        // Motor sliders. The uniforms only exist when the matching Motor body was compiled in
+        // (and that only happens when the master switch is on, Iris is absent and the slot was
+        // won under last-wins), so there is no extra Iris/off guard to add here.
+        if (this.uniformMotorShadowStrength != null) {
+            var motor = SodiumClientMod.options().motor;
+            this.uniformMotorShadowStrength.setFloat(percent(motor.shadowStrength));
+            // Absolute world height for the depth part of the analytic shadow tint.
+            this.uniformMotorCameraY.setFloat((float) cameraPos.y);
+        }
+
+        if (this.uniformMotorSheenStrength != null) {
+            var motor = SodiumClientMod.options().motor;
+            this.uniformMotorSheenStrength.setFloat(percent(motor.sheenStrength));
+            // Same mapping as the legacy sheen: a 2..16 Fresnel exponent.
+            this.uniformMotorSheenSoftness.setFloat(2.0F + 14.0F * percent(motor.sheenSoftness));
         }
 
         if (this.uniformLightPos != null) {
