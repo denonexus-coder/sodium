@@ -86,12 +86,12 @@ vec3 _colored_grid(vec3 worldPos) {
     vec3 colored = mix(texture(u_ColorLightTex, vec2(u, v0)).rgb,
                        texture(u_ColorLightTex, vec2(u, v1)).rgb, fz);
 
-    // Do not smear the border texel over every chunk outside the scanned volume. The grid only
-    // covers 32x16x32 blocks around the player; without this mask the clamped edge cell would
-    // colour the whole world, and would visibly flash whenever the grid was rebuilt.
+    // Do not smear the border texel over every chunk outside the scanned volume.
+    // Use an extended, softer linear edge falloff instead of a sharp 0.08 cutoff so that
+    // lights at the grid boundary smoothly transition to vanilla warmth without popping or blinking.
     vec3 edgeDist = min(gridCoord, vec3(1.0) - gridCoord);
     float edge = min(min(edgeDist.x, edgeDist.y), edgeDist.z);
-    colored *= smoothstep(0.0, 0.08, edge);
+    colored *= clamp(edge * 8.0, 0.0, 1.0);
 
     return colored;
 }

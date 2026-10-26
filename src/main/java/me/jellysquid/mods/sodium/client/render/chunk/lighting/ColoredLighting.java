@@ -482,9 +482,10 @@ public final class ColoredLighting {
         color[2] = blockColor[2];
     }
 
-    /** Called from the block-update hooks so both engines refresh on the next tick. */
+    /** Called from the block-update hooks so both engines refresh immediately. */
     public static void markDirty() {
         gridDirty = true;
+        ticksSinceGridRebuild = MIN_GRID_INTERVAL; // Force immediate rebuild on next tick without waiting 4 ticks
         AnalyticLighting.markDirty();
     }
 
@@ -1219,10 +1220,11 @@ public final class ColoredLighting {
                                             int x, int y, int z, int luminance) {
         Block block = state.getBlock();
 
-        // A lava lake is thousands of emitting cells. Seeding only the first cell of each run of
-        // the same block keeps the flood at a few dozen seeds instead of one per lava block; the
-        // run is contiguous, so the field is unchanged.
-        if (isSameSource(index, x, y, z, block) || sourceCount >= MAX_RETHINKING_SOURCES) {
+        // Seeding runs for fluid blocks (lava) keeps flood manageable, but discrete placed light
+        // blocks (torches, lanterns, soul lights, etc.) must NEVER be skipped by isSameSource,
+        // otherwise placed lights next to each other or placed in rows fail to color the ground.
+        boolean isFluid = block == Blocks.LAVA || block == Blocks.LAVA_CAULDRON;
+        if ((isFluid && isSameSource(index, x, y, z, block)) || sourceCount >= MAX_RETHINKING_SOURCES) {
             SOURCE_BLOCK[index] = block;
             return;
         }

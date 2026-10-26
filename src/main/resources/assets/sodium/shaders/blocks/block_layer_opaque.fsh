@@ -111,18 +111,20 @@ void main() {
 
     if (water) {
         // Sample MakeUp water texture for flow/wave data (RG format).
-        // textureLod: the lookup is inside a conditional, so an implicit-derivative texture()
-        // makes the driver warn (and can pick a different mip on a TBDR GPU).
-        vec2 waterUv = (v_MakeupWorldPos.xz + u_MakeupTime * 0.05) * 0.25;
-        vec2 waterData = textureLod(u_MakeupWaterTex, waterUv, 0.0).rg;
+        // Scale and animate UV coordinates to reveal caustics and subtle flow waves like MakeUp
+        vec2 waterUv1 = (v_MakeupWorldPos.xz * 0.125) + vec2(u_MakeupTime * 0.025, u_MakeupTime * 0.025);
+        vec2 waterUv2 = (v_MakeupWorldPos.xz * 0.08) - vec2(u_MakeupTime * 0.02, -u_MakeupTime * 0.015);
+        vec2 waterData1 = textureLod(u_MakeupWaterTex, waterUv1, 0.0).rg;
+        vec2 waterData2 = textureLod(u_MakeupWaterTex, waterUv2, 0.0).rg;
+        vec2 waterData = (waterData1 + waterData2) * 0.5;
         
-        // Sodium has no depth texture or scene-colour copy here, so the absorption is an
-        // angle-based approximation: the shallower the view, the less water the ray crosses.
+        // Water absorption based on incident angle
         float ndv = max(dot(normal, viewDir), 0.0);
-        float tint = clamp(u_MakeupWaterAbsorption * (1.0 - ndv) * 4.0, 0.0, 0.85);
+        float tint = clamp(u_MakeupWaterAbsorption * (1.0 - ndv * 0.5) * 3.5, 0.15, 0.85);
         
-        // Mix water color with texture data (R = foam/flow, G = depth/caustics)
-        vec3 waterTextureColor = mix(u_MakeupWaterColor, vec3(waterData.r, waterData.g, 0.0), 0.5);
+        // Caustics & depth coloration from RG texture channels
+        vec3 causticTint = vec3(waterData.g * 0.35 + waterData.r * 0.15);
+        vec3 waterTextureColor = u_MakeupWaterColor + causticTint;
         diffuseColor.rgb = mix(diffuseColor.rgb, waterTextureColor, tint);
     }
 
