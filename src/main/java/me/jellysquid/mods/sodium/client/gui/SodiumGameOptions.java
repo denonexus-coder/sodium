@@ -68,6 +68,10 @@ public class SodiumGameOptions {
         // Novas / por medir (padrão desligado):
         /** Novo: ordena os comandos por offset de vértice antes da fusão (passes opacas). */
         public boolean sortSubDraws = false;
+
+        // Multi-Region Coalescing (09b606df + 48fb039d do dev)
+        /** Duas fases (fill CPU -> dispatch GPU) para não forçar flushes prematuros em TBDR. */
+        public boolean useMultiRegionCoalescing = true;
     }
 
     public static class AdvancedSettings {

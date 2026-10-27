@@ -274,6 +274,16 @@ public class SodiumGameOptionPages {
                         .build()
                 )
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Multi-Region Coalescing"))
+                        .setTooltip(Text.literal("Preenche primeiro (CPU) todas as regiões visíveis e só depois despacha os draws (GPU), em duas fases separadas, com batches reutilizáveis por região.\n\n"
+                                + "Evita que o driver seja forçado a fazer flush a meio do preenchimento, um custo alto em arquiteturas TBDR (PowerVR GE8320).\n\n"
+                                + "O que afeta: a forma de submissão do terreno. Desligado, cada região é preenchida e desenhada de imediato, exatamente como sempre."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.performance.useMultiRegionCoalescing = value, opts -> opts.performance.useMultiRegionCoalescing)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.translatable("sodium.options.use_fog_occlusion.name"))
                         .setTooltip(Text.translatable("sodium.options.use_fog_occlusion.tooltip"))
                         .setControl(TickBoxControl::new)
