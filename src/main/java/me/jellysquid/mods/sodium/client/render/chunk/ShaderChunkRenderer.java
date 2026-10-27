@@ -5,15 +5,20 @@ import me.jellysquid.mods.sodium.client.gl.attribute.GlVertexFormat;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
 import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
 import me.jellysquid.mods.sodium.client.gl.shader.*;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.infinitium.InfinitiumLightEngine;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import me.jellysquid.mods.sodium.client.render.chunk.shader.*;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkMeshAttribute;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 import net.minecraft.util.Identifier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Map;
 
 public abstract class ShaderChunkRenderer implements ChunkRenderer {
+    private static final Logger LOGGER = LogManager.getLogger("InfinitiumLightEngine");
+
     private final Map<ChunkShaderOptions, GlProgram<ChunkShaderInterface>> programs = new Object2ObjectOpenHashMap<>();
 
     protected final ChunkVertexType vertexType;
@@ -33,7 +38,25 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
         GlProgram<ChunkShaderInterface> program = this.programs.get(options);
 
         if (program == null) {
-            this.programs.put(options, program = this.createShader("blocks/block_layer_opaque", options));
+            try {
+                this.programs.put(options, program = this.createShader("blocks/block_layer_opaque", options));
+            } catch (Throwable throwable) {
+                if (!options.infinitium()) {
+                    throw throwable instanceof RuntimeException runtime ? runtime : new RuntimeException(throwable);
+                }
+
+                // Este driver nao compilou o programa do ILE (o dev ja viu isto em GLES
+                // antigo). Em vez de deixar o mundo sem terreno, o motor desliga-se para a
+                // sessao e o programa stock e usado -- o jogador perde o efeito, nao o jogo.
+                InfinitiumLightEngine.markShaderFailed();
+                LOGGER.error("INFINITIUM LIGHT ENGINE: o shader nao compilou neste driver; " +
+                        "motor desligado para esta sessao (o Sodium volta ao shader normal)", throwable);
+
+                ChunkShaderOptions stock = new ChunkShaderOptions(options.fog(), options.pass(),
+                        options.vertexType(), false);
+
+                this.programs.put(options, program = this.createShader("blocks/block_layer_opaque", stock));
+            }
         }
 
         return program;
@@ -67,7 +90,10 @@ public abstract class ShaderChunkRenderer implements ChunkRenderer {
     protected void begin(TerrainRenderPass pass) {
         pass.startDrawing();
 
-        ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType);
+        // O interruptor mestre do ILE e lido aqui, a cada pass: ligar/desligar no menu compila
+        // (ou volta a usar) o programa no proprio frame, sem reiniciar o jogo.
+        ChunkShaderOptions options = new ChunkShaderOptions(ChunkFogMode.SMOOTH, pass, this.vertexType,
+                ChunkShaderOptions.infinitiumEnabled());
 
         this.activeProgram = this.compileProgram(options);
         this.activeProgram.bind();

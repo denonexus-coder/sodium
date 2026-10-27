@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gui.screen.ConfigCorruptedScreen;
 import me.jellysquid.mods.sodium.client.compatibility.checks.ResourcePackScanner;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.infinitium.InfinitiumLightEngine;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.RunArgs;
 import net.minecraft.client.realms.RealmsClient;
@@ -73,6 +74,17 @@ public class MinecraftClientMixin {
         }
 
         this.fences.enqueue(fence);
+    }
+
+    /**
+     * INFINITIUM LIGHT ENGINE: a reconstruicao da grelha RGB corre no fim do client tick, na
+     * render thread, com o contexto GL corrente -- por isso o upload da textura e seguro aqui.
+     * So corre quando o motor esta ligado e apenas quando ha trabalho (fronteira de 8 blocos,
+     * blocos em mudanca ou rede de seguranca), nunca por frame.
+     */
+    @Inject(method = "tick", at = @At("TAIL"))
+    private void infinitiumTick(CallbackInfo ci) {
+        InfinitiumLightEngine.tick();
     }
 
     /**

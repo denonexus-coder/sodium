@@ -25,6 +25,7 @@ public class SodiumGameOptions {
     public final AdvancedSettings advanced = new AdvancedSettings();
     public final PerformanceSettings performance = new PerformanceSettings();
     public final NotificationSettings notifications = new NotificationSettings();
+    public final InfinitiumSettings infinitium = new InfinitiumSettings();
 
     private boolean readOnly;
 
@@ -97,6 +98,80 @@ public class SodiumGameOptions {
     public static class NotificationSettings {
         public boolean hasClearedDonationButton = false;
         public boolean hasSeenDonationPrompt = false;
+    }
+
+    /**
+     * INFINITIUM LIGHT ENGINE -- um unico motor de iluminacao com interruptor mestre e
+     * sub-opcoes. Tudo aqui e lido ao vivo no caminho quente (tick + setupState + chave do
+     * programa), por isso ligar/desligar qualquer um destes campos faz efeito sem reiniciar o
+     * jogo: e assim que se faz A/B de verdade.
+     */
+    public static class InfinitiumSettings {
+        /** Interruptor mestre. Desligado: programa de shader stock, motor nao corre. */
+        public boolean enabled = true;
+
+        /** S2/S3: a cor RGB so entra em celulas com luz de bloco vanilla > 0 (paredes mandam). */
+        public boolean respectOcclusion = true;
+
+        /** S5.2: atenuacao 1/(1+k d²) suave; desligado usa a curva classica (1 - d²/R²)². */
+        public boolean smoothAttenuation = true;
+
+        /** S5.4/S6.3: media ponderada estavel; desligado acumula em bruto (o "efeito discoteca"). */
+        public boolean stableColorMix = true;
+
+        /** S6.2: filtragem temporal asimetrica -- aumentos imediatos, quedas amortecidas. */
+        public boolean temporalFilter = true;
+
+        /** S8: luz da mao (item luminoso) como fonte dinamica por frame, sem reconstruir a grelha. */
+        public boolean handLight = true;
+
+        /** S3/S10: prioridade as classes proximas e raio reduzido para as distantes. */
+        public boolean nearPriority = true;
+
+        /** S1: brilho sintetico opcional de minérios/metais/cristais (luz nivel 0 no vanilla). */
+        public boolean emissiveBlocks = false;
+
+        /** S10: regista o custo real de cada rebuild no log (uma linha a cada 2 s). */
+        public boolean debugStats = false;
+
+        /** S7: forca da tintura por vertice, 0..100%. */
+        public int tintStrength = 100;
+
+        /** Tamanho da grelha a volta do jogador (custo e alcance). */
+        public InfinitiumGridSize gridSize = InfinitiumGridSize.MEDIUM;
+    }
+
+    public enum InfinitiumGridSize implements TextProvider {
+        SMALL("Pequena", 24, 12, 24),
+        MEDIUM("Media", 32, 16, 32),
+        LARGE("Grande", 48, 24, 48);
+
+        private final Text name;
+        private final int sizeX, sizeY, sizeZ;
+
+        InfinitiumGridSize(String name, int sizeX, int sizeY, int sizeZ) {
+            this.name = Text.literal("Grelha " + name);
+            this.sizeX = sizeX;
+            this.sizeY = sizeY;
+            this.sizeZ = sizeZ;
+        }
+
+        @Override
+        public Text getLocalizedName() {
+            return this.name;
+        }
+
+        public int getSizeX() {
+            return this.sizeX;
+        }
+
+        public int getSizeY() {
+            return this.sizeY;
+        }
+
+        public int getSizeZ() {
+            return this.sizeZ;
+        }
     }
 
     public enum GraphicsQuality implements TextProvider {

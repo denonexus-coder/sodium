@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
 import me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import me.jellysquid.mods.sodium.client.render.chunk.lighting.infinitium.InfinitiumLightEngine;
 import me.jellysquid.mods.sodium.client.render.viewport.ViewportProvider;
 import me.jellysquid.mods.sodium.client.util.FlawlessFrames;
 import me.jellysquid.mods.sodium.client.world.WorldRendererExtended;
@@ -135,6 +136,10 @@ public abstract class WorldRendererMixin implements WorldRendererExtended {
     @Overwrite
     public void scheduleBlockRenders(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
         this.renderer.scheduleRebuildForBlockArea(minX, minY, minZ, maxX, maxY, maxZ, false);
+
+        // INFINITIUM LIGHT ENGINE: um bloco mudou -- a grelha RGB reconstrói no proximo tick
+        // (agrupado, no maximo 4 ticks depois), sem esperar pela rede de seguranca.
+        InfinitiumLightEngine.markDirty();
     }
 
     /**
@@ -144,6 +149,9 @@ public abstract class WorldRendererMixin implements WorldRendererExtended {
     @Overwrite
     public void scheduleBlockRenders(int x, int y, int z) {
         this.renderer.scheduleRebuildForChunks(x - 1, y - 1, z - 1, x + 1, y + 1, z + 1, false);
+
+        // INFINITIUM LIGHT ENGINE: ver scheduleBlockRenders(area).
+        InfinitiumLightEngine.markDirty();
     }
 
     /**
