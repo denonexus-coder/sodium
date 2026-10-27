@@ -128,6 +128,9 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                                           boolean cullFaceEnabled) {
         batch.clear();
 
+        // Interrupores A/B: lidos por frame, sem reinício. Ver SodiumGameOptions.performance.
+        final var perf = SodiumClientMod.options().performance;
+
         var iterator = renderList.sectionsWithGeometryIterator(pass.isReverseOrder());
 
         // Sub-draws added before mergeContiguousCommands(); one per set face bit, which is exactly
@@ -161,7 +164,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
 
                     FrameTrace.add(FrameTrace.FACES_VISIBLE, Integer.bitCount(visible & geometryMask));
 
-                    if (cullFaceEnabled) {
+                    if (cullFaceEnabled && perf.widenVisibleFaces) {
                         // Merge-aware: one contiguous run per section, folded to one draw below.
                         slices = expandToGeometryRun(visible, geometryMask);
 
@@ -169,6 +172,7 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
                     } else {
                         // Without a cull in the driver the plane test is the only thing keeping back
                         // faces off screen, so widen nothing: exactly what was always submitted.
+                        // (Or the A/B switch is off, which submits the same faces as vanilla.)
                         slices = visible;
                     }
                 }
@@ -197,7 +201,16 @@ public class DefaultChunkRenderer extends ShaderChunkRenderer {
         // reports a larger element count and the template has to cover it.
         final long tMerge = FrameTrace.now();
 
-        batch.mergeContiguousCommands();
+        if (perf.mergeSubDraws) {
+            // Optional A/B: order the commands by their vertex offset first so the merge finds
+            // the longest possible contiguous runs. Never on a reverse-order (translucent) pass,
+            // where the iteration order is the paint order and must survive.
+            if (perf.sortSubDraws && !pass.isReverseOrder()) {
+                batch.sortByBaseVertex();
+            }
+
+            batch.mergeContiguousCommands();
+        }
 
         FrameTrace.addTime(FrameTrace.T_MERGE, tMerge);
         FrameTrace.add(FrameTrace.SUBDRAWS_FOLDED, preMerge - batch.size);

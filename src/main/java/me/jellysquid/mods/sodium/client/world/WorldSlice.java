@@ -1,6 +1,7 @@
 package me.jellysquid.mods.sodium.client.world;
 
 import it.unimi.dsi.fastutil.ints.Int2ReferenceMap;
+import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.world.biome.BiomeColorCache;
 import me.jellysquid.mods.sodium.client.world.biome.BiomeColorSource;
 import me.jellysquid.mods.sodium.client.world.biome.BiomeColorView;
@@ -76,6 +77,10 @@ public final class WorldSlice implements BlockRenderView, BiomeColorView, Render
 
     // (Local Section -> Block States) table.
     private final BlockState[][] blockArrays;
+
+    // (Local Section -> the clone last unpacked into blockArrays) table. Used to skip re-copying
+    // neighbour sections that cannot have changed; see copySectionData().
+    private final ClonedChunkSection[] unpackedSections = new ClonedChunkSection[SECTION_ARRAY_SIZE];
 
     // (Local Section -> Light Arrays) table.
     private final @Nullable ChunkNibbleArray[][] lightArrays;
@@ -174,8 +179,34 @@ public final class WorldSlice implements BlockRenderView, BiomeColorView, Render
 
         Objects.requireNonNull(section, "Chunk section must be non-null");
 
-        this.unpackBlockData(this.blockArrays[sectionIndex], context, section);
+        // The slice covers 3x3x3 sections but a build task meshes exactly one of them, so on a
+        // typical job 26 of the 27 entries are byte-for-byte what we already unpacked. The unpack
+        // is the expensive half of this method -- the centre section writes 4096 references and the
+        // neighbours another ~3900, against a handful of reference stores below -- so identity
+        // matching it away removes roughly half of the ~8000 element writes (32 KB of memory
+        // traffic) that every rebuild pays, and the worker threads pay it while the main thread
+        // waits for them.
+        //
+        // Object identity is an exact test here: ClonedChunkSection's content fields are all final
+        // (only the last-used timestamp is written), a clone is a deep copy via PalettedContainer
+        // #copy, and ClonedChunkSectionCache#invalidate() removes the entry rather than mutating it
+        // -- so a changed section always comes back as a different object.
+        //
+        // blockArrays[] is written by nothing but this unpack (the constructor fills it once and
+        // reset() deliberately leaves it alone), so an identity match also means the array still
+        // holds precisely this section's data.
+        // Interruptor A/B (performance.skipNeighborUnpacks): desligado, volta a copiar sempre,
+        // que era o comportamento antigo; ligado, salta os que não mudaram.
+        if (!SodiumClientMod.options().performance.skipNeighborUnpacks ||
+                this.unpackedSections[sectionIndex] != section) {
+            this.unpackBlockData(this.blockArrays[sectionIndex], context, section);
 
+            this.unpackedSections[sectionIndex] = section;
+        }
+
+        // Unconditional on purpose: unlike blockArrays, reset() nulls these after every job, so
+        // skipping the stores here would leave the next job reading null light and block entity
+        // data. Four reference stores are not worth a stale-slice bug.
         this.lightArrays[sectionIndex][LightType.BLOCK.ordinal()] = section.getLightArray(LightType.BLOCK);
         this.lightArrays[sectionIndex][LightType.SKY.ordinal()] = section.getLightArray(LightType.SKY);
 

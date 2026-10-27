@@ -2,6 +2,7 @@ package me.jellysquid.mods.sodium.client.gl.arena.staging;
 
 import it.unimi.dsi.fastutil.PriorityQueue;
 import it.unimi.dsi.fastutil.objects.ObjectArrayFIFOQueue;
+import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.gl.buffer.*;
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
 import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
@@ -22,11 +23,25 @@ public class MappedStagingBuffer implements StagingBuffer {
     // 0.255ms vs 0.310ms for EXPLICIT_FLUSH+auto. EXPLICIT_FLUSH is kept alongside COHERENT --
     // the spec only forbids COHERENT without PERSISTENT -- so a glFlushMappedBufferRange on this
     // mapping would stay a legal call, even though flush() no longer needs to make one.
-    private static final EnumBitField<GlBufferStorageFlags> STORAGE_FLAGS =
-            EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.COHERENT, GlBufferStorageFlags.MAP_WRITE);
+    //
+    // A/B switch (performance.coherentStaging): the flag set is chosen when the buffer is
+    // created, so the option is applied through a renderer reload (still no game restart).
+    private static EnumBitField<GlBufferStorageFlags> storageFlags() {
+        if (SodiumClientMod.options().performance.coherentStaging) {
+            return EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.COHERENT, GlBufferStorageFlags.MAP_WRITE);
+        }
 
-    private static final EnumBitField<GlBufferMapFlags> MAP_FLAGS =
-            EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.COHERENT, GlBufferMapFlags.INVALIDATE_BUFFER, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH);
+        // Baseline medido (o que corria antes do 0940dac1): CLIENT_STORAGE, sem COHERENT.
+        return EnumBitField.of(GlBufferStorageFlags.PERSISTENT, GlBufferStorageFlags.CLIENT_STORAGE, GlBufferStorageFlags.MAP_WRITE);
+    }
+
+    private static EnumBitField<GlBufferMapFlags> mapFlags() {
+        if (SodiumClientMod.options().performance.coherentStaging) {
+            return EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.COHERENT, GlBufferMapFlags.INVALIDATE_BUFFER, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH);
+        }
+
+        return EnumBitField.of(GlBufferMapFlags.PERSISTENT, GlBufferMapFlags.INVALIDATE_BUFFER, GlBufferMapFlags.WRITE, GlBufferMapFlags.EXPLICIT_FLUSH);
+    }
 
     private final FallbackStagingBuffer fallbackStagingBuffer;
 
@@ -45,8 +60,8 @@ public class MappedStagingBuffer implements StagingBuffer {
     }
 
     public MappedStagingBuffer(CommandList commandList, int capacity) {
-        GlImmutableBuffer buffer = commandList.createImmutableBuffer(capacity, STORAGE_FLAGS);
-        GlBufferMapping map = commandList.mapBuffer(buffer, 0, capacity, MAP_FLAGS);
+        GlImmutableBuffer buffer = commandList.createImmutableBuffer(capacity, storageFlags());
+        GlBufferMapping map = commandList.mapBuffer(buffer, 0, capacity, mapFlags());
 
         this.mappedBuffer = new MappedBuffer(buffer, map);
         this.fallbackStagingBuffer = new FallbackStagingBuffer(commandList);

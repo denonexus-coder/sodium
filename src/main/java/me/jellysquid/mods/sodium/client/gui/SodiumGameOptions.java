@@ -46,6 +46,28 @@ public class SodiumGameOptions {
         public boolean useFogOcclusion = true;
         public boolean useBlockFaceCulling = true;
         public boolean useNoErrorGLContext = true;
+
+        // Otimizações A/B -- cada uma tem o seu interruptor na página Desempenho e é lida no
+        // próprio caminho quente, por isso ligar/desligar faz efeito no frame seguinte, sem
+        // reiniciar o jogo. As marcas "medido" vêm dos números do commit de cada uma.
+        //
+        // Medidas (padrão ligado):
+        /**0940dac1 A1: dobra sub-draws contíguas em uma (medido: ~2.2 us por sub-draw no PowerVR). */
+        public boolean mergeSubDraws = true;
+        /** c43b6b32: intervalo de faces contíguo por secção, pré-requisito da fusão acima. */
+        public boolean widenVisibleFaces = true;
+        /** 0940dac1 A2: staging PERSISTENT+COHERENT (medido: 0.255 ms vs 0.310 ms no GE8320). */
+        public boolean coherentStaging = true;
+        /** 24b0e95e: nao re-desempacota vêinhos que nao mudaram (~32 KB menos por job). */
+        public boolean skipNeighborUnpacks = true;
+        /** 24b0e95e: carimbo de geração O(1) em vez de Arrays.fill de 8000 ints por rebuild. */
+        public boolean lightCacheGenStamp = true;
+        /** Novo: nao reenvia uniformes cujo valor nao mudou (estado visivel identico). */
+        public boolean uniformValueCache = true;
+        //
+        // Novas / por medir (padrão desligado):
+        /** Novo: ordena os comandos por offset de vértice antes da fusão (passes opacas). */
+        public boolean sortSubDraws = false;
     }
 
     public static class AdvancedSettings {

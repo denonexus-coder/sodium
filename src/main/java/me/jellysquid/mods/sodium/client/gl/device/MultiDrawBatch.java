@@ -65,6 +65,46 @@ public final class MultiDrawBatch {
     }
 
     /**
+     * Orders the queued commands by ascending base vertex, so that {@link #mergeContiguousCommands()}
+     * sees them in vertex-buffer order and folds the longest runs it can. Optional A/B path
+     * ({@code performance.sortSubDraws}); never call it for a reverse-order pass, where the queue
+     * order is the paint order for translucent geometry.
+     *
+     * <p>Insertion sort: the queue is small (at most {@code ModelQuadFacing.COUNT * REGION_SIZE + 1}
+     * entries) and almost sorted already, so this stays well inside the cost it saves.
+     */
+    public void sortByBaseVertex() {
+        final int count = this.size;
+
+        for (int i = 1; i < count; i++) {
+            final long src = (long) i << 2;
+
+            final int baseVertex = MemoryUtil.memGetInt(this.pBaseVertex + src);
+            final int elementCount = MemoryUtil.memGetInt(this.pElementCount + src);
+            final long elementPointer = MemoryUtil.memGetAddress(this.pElementPointer + ((long) i << Pointer.POINTER_SHIFT));
+
+            int j = i - 1;
+
+            while (j >= 0 && Integer.compareUnsigned(MemoryUtil.memGetInt(this.pBaseVertex + ((long) j << 2)), baseVertex) > 0) {
+                final long dst = (long) (j + 1) << 2;
+
+                MemoryUtil.memPutInt(this.pBaseVertex + dst, MemoryUtil.memGetInt(this.pBaseVertex + ((long) j << 2)));
+                MemoryUtil.memPutInt(this.pElementCount + dst, MemoryUtil.memGetInt(this.pElementCount + ((long) j << 2)));
+                MemoryUtil.memPutAddress(this.pElementPointer + ((long) (j + 1) << Pointer.POINTER_SHIFT),
+                        MemoryUtil.memGetAddress(this.pElementPointer + ((long) j << Pointer.POINTER_SHIFT)));
+
+                j--;
+            }
+
+            final long dst = (long) (j + 1) << 2;
+
+            MemoryUtil.memPutInt(this.pBaseVertex + dst, baseVertex);
+            MemoryUtil.memPutInt(this.pElementCount + dst, elementCount);
+            MemoryUtil.memPutAddress(this.pElementPointer + ((long) (j + 1) << Pointer.POINTER_SHIFT), elementPointer);
+        }
+    }
+
+    /**
      * Combines consecutive draw commands which read from the same index buffer and whose vertex
      * ranges are exactly contiguous, cutting the number of sub-draws the driver must replay.
      *
