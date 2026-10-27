@@ -799,7 +799,7 @@ public final class InfinitiumLightEngine {
         }
 
         BLOCK_POS.set(ox + x, oy + y, oz + z);
-        int level = world.getLight(BLOCK_POS, LightType.BLOCK);
+        int level = world.getLightLevel(LightType.BLOCK, BLOCK_POS);
 
         maskLight[cell] = (byte) level;
         maskStamp[cell] = rebuildEpoch;
