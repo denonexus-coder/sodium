@@ -472,120 +472,104 @@ public class SodiumGameOptionPages {
         groups.add(OptionGroup.createBuilder()
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
                         .setName(Text.literal("INFINITIUM LIGHT ENGINE"))
-                        .setTooltip(Text.literal("Interruptor mestre do motor de iluminacao voxel.\n\n"
-                                + "Hibrido: a luz vanilla continua a dar niveis, oclusao e construcao de chunks; o ILE "
-                                + "propaga apenas a COR RGB numa grelha propria a volta do jogador e aplica-a a malha por vertice.\n\n"
-                                + "Um unico caminho, com as sub-opcoes abaixo. Desligado, o shader de chunks e identico ao do Sodium normal."))
+                        .setTooltip(Text.literal("Interruptor mestre do motor de iluminacao voxel fiel ao rethinking-voxels.\n\n"
+                                + "Paleta (47 cores) e formulas LITERAIS do shaderpack: avaliacao direta fonte->ponto, "
+                                + "atenuacao (1-d/nivel)^2, soma additiva + normalizacao log (sem arco-iris).\n\n"
+                                + "Desligado, o shader de chunks e identico ao do Sodium normal."))
                         .setControl(TickBoxControl::new)
                         .setImpact(OptionImpact.HIGH)
                         .setBinding((opts, value) -> opts.infinitium.enabled = value,
                                 opts -> opts.infinitium.enabled)
                         .build())
+                .add(OptionImpl.createBuilder(SodiumGameOptions.InfinitiumColorMode.class, sodiumOpts)
+                        .setName(Text.literal("Modo de cor"))
+                        .setTooltip(Text.literal("O que a cor RV substitui.\n\n"
+                                + "So blocklight: mantem o ceu/ambiente vanilla e so substitui a luz de bloco pela cor "
+                                + "das fontes reais. Tudo: remove o lightmap e usa ceu simples + luz RV.\n\n"
+                                + "Alternavel ao vivo para comparar."))
+                        .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.InfinitiumColorMode.class))
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.infinitium.colorMode = value,
+                                opts -> opts.infinitium.colorMode)
+                        .build())
+                .add(OptionImpl.createBuilder(SodiumGameOptions.InfinitiumShadingMode.class, sodiumOpts)
+                        .setName(Text.literal("Modo de sombra"))
+                        .setTooltip(Text.literal("Como o sombreamento N.L e aplicado (apenas sombra, sem raytrace).\n\n"
+                                + "Normal por vertice: N.L com a normal da face, barato. Solido: sem N.L extra (usa o "
+                                + "shading vanilla). Por pixel: N.L com normal geometrica por pixel, mais caro.\n\n"
+                                + "Alternavel ao vivo para ver em jogo o custo de cada um."))
+                        .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.InfinitiumShadingMode.class))
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.infinitium.shadingMode = value,
+                                opts -> opts.infinitium.shadingMode)
+                        .build())
                 .add(OptionImpl.createBuilder(SodiumGameOptions.InfinitiumGridSize.class, sodiumOpts)
                         .setName(Text.literal("Tamanho da grelha"))
                         .setTooltip(Text.literal("Quantos blocos a volta do jogador a grelha RGB cobre.\n\n"
-                                + "Pequena: 24x12x24 (mais barata). Media: 32x16x32 (padrao). Grande: 48x24x48 (mais alcance, "
-                                + "raio de luz 14).\n\n"
-                                + "O que afeta: memoria e custo do rebuild (que so corre quando o jogador atravessa 8 blocos ou muda um bloco)."))
+                                + "Pequena: 24x12x24 (mais barata). Media: 32x16x32 (padrao). Grande: 48x24x48 (mais alcance)."))
                         .setControl(option -> new CyclingControl<>(option, SodiumGameOptions.InfinitiumGridSize.class))
                         .setImpact(OptionImpact.MEDIUM)
                         .setBinding((opts, value) -> opts.infinitium.gridSize = value,
                                 opts -> opts.infinitium.gridSize)
                         .build())
-                .add(OptionImpl.createBuilder(int.class, sodiumOpts)
-                        .setName(Text.literal("Forca da cor"))
-                        .setTooltip(Text.literal("Quanto a cor do ILE tinge a luz existente (0 a 100%).\n\n"
-                                + "Em 100% uma tocha tinge as paredes de laranja-quente; em 0% a luz fica vanilla. A intensidade "
-                                + "e a oclusao continuam sempre da luz vanilla."))
-                        .setControl(option -> new SliderControl(option, 0, 100, 5, ControlValueFormatter.percentage()))
+                .build());
+
+        groups.add(OptionGroup.createBuilder()
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Atenuacao quadratica (RV)"))
+                        .setTooltip(Text.literal("Curva de queda da luz por distancia, literal do RV: 0.0625*nivel*(1-d/nivel)^2.\n\n"
+                                + "Desligado usa a forma linear (1-d/nivel). E a formula exata do rethinking-voxels."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.LOW)
+                        .setBinding((opts, value) -> opts.infinitium.attenQuadratic = value,
+                                opts -> opts.infinitium.attenQuadratic)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Normalizacao log (RV)"))
+                        .setTooltip(Text.literal("Mistura das fontes: soma additiva + cor/max * log(max*0.4 + 1), literal do RV.\n\n"
+                                + "Preserva o matiz (duas cores combinam sem arco-iris). Desligado soma em bruto com clamp "
+                                + "o 'efeito discoteca' que se quer poder comparar."))
+                        .setControl(TickBoxControl::new)
                         .setImpact(OptionImpact.MEDIUM)
-                        .setBinding((opts, value) -> opts.infinitium.tintStrength = value,
-                                opts -> opts.infinitium.tintStrength)
+                        .setBinding((opts, value) -> opts.infinitium.logNormalize = value,
+                                opts -> opts.infinitium.logNormalize)
+                        .build())
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Limiar 0.01 (RV)"))
+                        .setTooltip(Text.literal("Ignora contribuicao de fonte com atenuacao < 0.01, limiar literal do RV.\n\n"
+                                + "Remove o ruido de fontes muito distantes. Desligado soma tudo."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.LOW)
+                        .setBinding((opts, value) -> opts.infinitium.threshold = value,
+                                opts -> opts.infinitium.threshold)
                         .build())
                 .build());
 
         groups.add(OptionGroup.createBuilder()
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Oclusao por paredes (S2/S3)"))
-                        .setTooltip(Text.literal("A cor RGB so se propaga por celulas que a luz de bloco vanilla alcancou.\n\n"
-                                + "Paredes opacas, portas fechadas e agua comportam-se exatamente como o jogo: a luz nao "
-                                + "atravessa obstaculos e cada material tem a translucidez que o vanilla lhe da.\n\n"
-                                + "Desligado, a cor espalha-se em esfera (atravessa paredes) -- e o modo de comparacao."))
-                        .setControl(TickBoxControl::new)
-                        .setImpact(OptionImpact.HIGH)
-                        .setBinding((opts, value) -> opts.infinitium.respectOcclusion = value,
-                                opts -> opts.infinitium.respectOcclusion)
-                        .build())
-                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Atenuacao suave (S5)"))
-                        .setTooltip(Text.literal("Curva de queda da cor por distancia: 1/(1+k d²).\n\n"
-                                + "A cor nao desaparece de forma abrupta ao afastar -- sobe e cai progressivamente. "
-                                + "Desligado usa a curva classica (1 - d²/R²)², que corta a zero exatamente no raio."))
-                        .setControl(TickBoxControl::new)
-                        .setImpact(OptionImpact.LOW)
-                        .setBinding((opts, value) -> opts.infinitium.smoothAttenuation = value,
-                                opts -> opts.infinitium.smoothAttenuation)
-                        .build())
-                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Mistura estavel (S5/S6)"))
-                        .setTooltip(Text.literal("As contribuicoes das fontes sao combinadas como media ponderada normalizada: "
-                                + "duas tochas de cores diferentes nao explodem em saturacao e a cor de cada uma mantem a "
-                                + "identidade onde domina.\n\n"
-                                + "Desligado, as cores sao somadas em bruto com clamp -- o 'efeito discoteca' que se quer poder comparar."))
-                        .setControl(TickBoxControl::new)
-                        .setImpact(OptionImpact.MEDIUM)
-                        .setBinding((opts, value) -> opts.infinitium.stableColorMix = value,
-                                opts -> opts.infinitium.stableColorMix)
-                        .build())
-                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Filtragem temporal (S6)"))
-                        .setTooltip(Text.literal("Suaviza oscilacoes entre reconstruicoes sem atrasar nada importante: "
-                                + "aumentos (acender uma tocha) passam de imediato; quedas (apagar) descem amortecidas "
-                                + "em cerca de 4 reconstruicoes.\n\n"
-                                + "O que afeta: estabilidade da cor a andar e a colocar/retirar fontes."))
-                        .setControl(TickBoxControl::new)
-                        .setImpact(OptionImpact.LOW)
-                        .setBinding((opts, value) -> opts.infinitium.temporalFilter = value,
-                                opts -> opts.infinitium.temporalFilter)
-                        .build())
-                .build());
-
-        groups.add(OptionGroup.createBuilder()
-                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Luz na mao (S8)"))
-                        .setTooltip(Text.literal("O item luminoso na mao ilumina a volta como fonte dinamica.\n\n"
-                                + "E atualizada por frame como uma fonte móvel propria: andar com uma tocha na mao nao "
-                                + "reconstrói a grelha a cada passo. Balde de lava conta."))
+                        .setName(Text.literal("Luz na mao (RV)"))
+                        .setTooltip(Text.literal("O item luminoso na mao ilumina a volta como fonte dinamica, pela mesma "
+                                + "paleta e atenuacao RV.\n\n"
+                                + "Atualizada por frame (sem reconstruir a grelha a cada passo). Balde de lava conta."))
                         .setControl(TickBoxControl::new)
                         .setImpact(OptionImpact.MEDIUM)
                         .setBinding((opts, value) -> opts.infinitium.handLight = value,
                                 opts -> opts.infinitium.handLight)
                         .build())
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Prioridade a luz proxima (S3/S10)"))
-                        .setTooltip(Text.literal("Classes de luz cujas fontes estao la fora de 24 blocos sao processadas por "
-                                + "ultimo e com metade do raio: a luz proxima nunca espera pela distante.\n\n"
-                                + "O que afeta: ordem e custo do rebuild (a fisica da luz nao muda, so a ordem do trabalho)."))
-                        .setControl(TickBoxControl::new)
-                        .setImpact(OptionImpact.LOW)
-                        .setBinding((opts, value) -> opts.infinitium.nearPriority = value,
-                                opts -> opts.infinitium.nearPriority)
-                        .build())
-                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Brilho de minérios (S1)"))
-                        .setTooltip(Text.literal("Blocos que o vanilla deixa a zero (minérios, metais, cristais) passam a "
-                                + "emitir um brilho fraco da sua cor mineral.\n\n"
-                                + "E uma tabela de dados extra no mesmo scan -- sem passe, textura ou uniform novo. "
-                                + "Ligado so, aumenta o numero de fontes."))
+                        .setName(Text.literal("Ametista/sculk emissivos (RV)"))
+                        .setTooltip(Text.literal("Blocos que o vanilla deixa a zero (ametista, sculk, cogumelos) passam a "
+                                + "emitir o brilho fraco da paleta RV.\n\n"
+                                + "Aumenta o numero de fontes."))
                         .setControl(TickBoxControl::new)
                         .setImpact(OptionImpact.LOW)
                         .setBinding((opts, value) -> opts.infinitium.emissiveBlocks = value,
                                 opts -> opts.infinitium.emissiveBlocks)
                         .build())
                 .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
-                        .setName(Text.literal("Estatisticas (S10)"))
-                        .setTooltip(Text.literal("Regista no log o custo real de cada reconstruicao do ILE: tempo em ms, "
-                                + "classes de cor, fontes e celulas iluminadas.\n\n"
+                        .setName(Text.literal("Estatisticas"))
+                        .setTooltip(Text.literal("Regista no log o custo real de cada reconstruicao: tempo em ms, "
+                                + "numero de fontes e tamanho da grelha.\n\n"
                                 + "Uma linha a cada 2 segundos enquanto ligado."))
                         .setControl(TickBoxControl::new)
                         .setImpact(OptionImpact.LOW)

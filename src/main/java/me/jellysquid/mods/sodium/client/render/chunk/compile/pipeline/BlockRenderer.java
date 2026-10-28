@@ -164,7 +164,7 @@ public class BlockRenderer {
         }
 
         var vertexBuffer = builder.getVertexBuffer(normalFace);
-        vertexBuffer.push(vertices, material);
+        vertexBuffer.push(vertices, material.withFace(normalFace));
     }
 
     private LightMode getLightingMode(BlockState state, BakedModel model) {

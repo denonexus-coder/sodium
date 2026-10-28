@@ -101,44 +101,41 @@ public class SodiumGameOptions {
     }
 
     /**
-     * INFINITIUM LIGHT ENGINE -- um unico motor de iluminacao com interruptor mestre e
-     * sub-opcoes. Tudo aqui e lido ao vivo no caminho quente (tick + setupState + chave do
-     * programa), por isso ligar/desligar qualquer um destes campos faz efeito sem reiniciar o
-     * jogo: e assim que se faz A/B de verdade.
+     * INFINITIUM LIGHT ENGINE -- motor de iluminacao fiel ao rethinking-voxels: paleta e
+     * formulas LITERAIS do shaderpack (sem inventar), avaliacao direta fonte->ponto (sem BFS,
+     * sem gate de luz vanilla). Tudo aqui e lido ao vivo no caminho quente (tick + setupState),
+     * por isso ligar/desligar qualquer campo faz efeito sem reiniciar o jogo.
      */
     public static class InfinitiumSettings {
         /** Interruptor mestre. Desligado: programa de shader stock, motor nao corre. */
         public boolean enabled = true;
 
-        /** S2/S3: a cor RGB so entra em celulas com luz de bloco vanilla > 0 (paredes mandam). */
-        public boolean respectOcclusion = true;
+        /** O que a cor RV substitui (2 modos, alternaveis ao vivo). */
+        public InfinitiumColorMode colorMode = InfinitiumColorMode.BLOCKLIGHT_ONLY;
 
-        /** S5.2: atenuacao 1/(1+k d²) suave; desligado usa a curva classica (1 - d²/R²)². */
-        public boolean smoothAttenuation = true;
+        /** Como o sombreamento N.L e aplicado (3 modos, alternaveis ao vivo). */
+        public InfinitiumShadingMode shadingMode = InfinitiumShadingMode.VERTEX_NL;
 
-        /** S5.4/S6.3: media ponderada estavel; desligado acumula em bruto (o "efeito discoteca"). */
-        public boolean stableColorMix = true;
-
-        /** S6.2: filtragem temporal asimetrica -- aumentos imediatos, quedas amortecidas. */
-        public boolean temporalFilter = true;
-
-        /** S8: luz da mao (item luminoso) como fonte dinamica por frame, sem reconstruir a grelha. */
+        /** Luz da mao (item luminoso) como fonte dinamica, pela mesma paleta RV. */
         public boolean handLight = true;
-
-        /** S3/S10: prioridade as classes proximas e raio reduzido para as distantes. */
-        public boolean nearPriority = true;
-
-        /** S1: brilho sintetico opcional de minérios/metais/cristais (luz nivel 0 no vanilla). */
-        public boolean emissiveBlocks = false;
-
-        /** S10: regista o custo real de cada rebuild no log (uma linha a cada 2 s). */
-        public boolean debugStats = false;
-
-        /** S7: forca da tintura por vertice, 0..100%. */
-        public int tintStrength = 100;
 
         /** Tamanho da grelha a volta do jogador (custo e alcance). */
         public InfinitiumGridSize gridSize = InfinitiumGridSize.MEDIUM;
+
+        /** Atenuacao quadratica (1 - d/nivel)^2 do RV; desligado = linear (1 - d/nivel). */
+        public boolean attenQuadratic = true;
+
+        /** Normalizacao log do RV (mistura estavel, sem arco-iris); desligado = soma crua. */
+        public boolean logNormalize = true;
+
+        /** Ignora contribuicao de fonte < 0.01 (limiar literal do RV). */
+        public boolean threshold = true;
+
+        /** Brilho sintetico RV de ametista/sculk (luz 0 no vanilla), fiel a paleta. */
+        public boolean emissiveBlocks = true;
+
+        /** Regista o custo real de cada rebuild no log (uma linha a cada 2 s). */
+        public boolean debugStats = false;
     }
 
     public enum InfinitiumGridSize implements TextProvider {
@@ -171,6 +168,41 @@ public class SodiumGameOptions {
 
         public int getSizeZ() {
             return this.sizeZ;
+        }
+    }
+
+    /** Os 2 modos de cor do RV: o que a luz colorida substitui. */
+    public enum InfinitiumColorMode implements TextProvider {
+        BLOCKLIGHT_ONLY("So blocklight"),
+        FULL("Tudo (sem lightmap)");
+
+        private final Text name;
+
+        InfinitiumColorMode(String name) {
+            this.name = Text.literal("Cor: " + name);
+        }
+
+        @Override
+        public Text getLocalizedName() {
+            return this.name;
+        }
+    }
+
+    /** Os 3 modos de sombreamento do RV (apenas sombreamento, sem sombra): custo alternavel. */
+    public enum InfinitiumShadingMode implements TextProvider {
+        VERTEX_NL("Normal por vertice (N.L)"),
+        SOLID_VANILLA("Solido (luz vanilla)"),
+        PIXEL_NL("N.L por pixel");
+
+        private final Text name;
+
+        InfinitiumShadingMode(String name) {
+            this.name = Text.literal("Sombra: " + name);
+        }
+
+        @Override
+        public Text getLocalizedName() {
+            return this.name;
         }
     }
 

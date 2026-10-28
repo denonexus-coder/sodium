@@ -2,7 +2,6 @@ package me.jellysquid.mods.sodium.client.render.chunk.shader;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import me.jellysquid.mods.sodium.client.gl.device.GLRenderDevice;
-import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat2v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat3v;
 import me.jellysquid.mods.sodium.client.gl.shader.uniform.GlUniformFloat4v;
@@ -46,9 +45,10 @@ public class ChunkShaderInterface {
     private final GlUniformInt uniformInfinitiumTex;
     private final GlUniformFloat3v uniformInfinitiumOrigin;
     private final GlUniformFloat3v uniformInfinitiumScale;
-    private final GlUniformFloat uniformInfinitiumTint;
     private final GlUniformFloat4v uniformInfinitiumHand;
     private final GlUniformFloat3v uniformInfinitiumHandColor;
+    private final GlUniformInt uniformInfinitiumColorMode;
+    private final GlUniformInt uniformInfinitiumShadingMode;
 
     // The fog shader component used by this program in order to setup the appropriate GL state
     private final ChunkShaderFogComponent fogShader;
@@ -67,9 +67,10 @@ public class ChunkShaderInterface {
             this.uniformInfinitiumTex = context.bindUniform("u_InfinitiumTex", GlUniformInt::new);
             this.uniformInfinitiumOrigin = context.bindUniform("u_InfinitiumOrigin", GlUniformFloat3v::new);
             this.uniformInfinitiumScale = context.bindUniform("u_InfinitiumScale", GlUniformFloat3v::new);
-            this.uniformInfinitiumTint = context.bindUniform("u_InfinitiumTint", GlUniformFloat::new);
             this.uniformInfinitiumHand = context.bindUniform("u_InfinitiumHand", GlUniformFloat4v::new);
             this.uniformInfinitiumHandColor = context.bindUniform("u_InfinitiumHandColor", GlUniformFloat3v::new);
+            this.uniformInfinitiumColorMode = context.bindUniform("u_InfinitiumColorMode", GlUniformInt::new);
+            this.uniformInfinitiumShadingMode = context.bindUniform("u_InfinitiumShadingMode", GlUniformInt::new);
 
             // bindTexture() resolve o sampler pelo mapa: sem esta entrada, o slot INF daria NPE
             // no primeiro frame (foi exactamente o crash build.81 no aparelho).
@@ -78,9 +79,10 @@ public class ChunkShaderInterface {
             this.uniformInfinitiumTex = null;
             this.uniformInfinitiumOrigin = null;
             this.uniformInfinitiumScale = null;
-            this.uniformInfinitiumTint = null;
             this.uniformInfinitiumHand = null;
             this.uniformInfinitiumHandColor = null;
+            this.uniformInfinitiumColorMode = null;
+            this.uniformInfinitiumShadingMode = null;
         }
 
         this.fogShader = options.fog().getFactory().apply(context);
@@ -144,7 +146,8 @@ public class ChunkShaderInterface {
                     InfinitiumLightEngine.getScaleY(),
                     InfinitiumLightEngine.getScaleZ());
 
-            this.uniformInfinitiumTint.setFloat(InfinitiumLightEngine.getTintStrength());
+            this.uniformInfinitiumColorMode.setInt(InfinitiumLightEngine.getColorMode());
+            this.uniformInfinitiumShadingMode.setInt(InfinitiumLightEngine.getShadingMode());
 
             InfinitiumLightEngine.writeHandLight(cameraPos, HAND_LIGHT, HAND_COLOR);
 

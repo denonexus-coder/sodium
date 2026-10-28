@@ -17,32 +17,34 @@ out float v_MaterialAlphaCutoff;
 out float v_FragDistance;
 #endif
 
+#ifdef INFINITIUM_LIGHT
+// Passados ao fragmento para o modo N.L por pixel (sombreamento 2).
+out vec3 v_InfWorldPos;
+out vec3 v_InfLightDir;
+#endif
+
 uniform int u_FogShape;
 uniform vec3 u_RegionOffset;
 uniform vec2 u_TexCoordShrink;
 
 uniform sampler2D u_LightTex; // The light map texture sampler
 
-// ── INFINITIUM LIGHT ENGINE ──────────────────────────────────────────────────────
-// A cor RGB e aplicada por vertice, nunca por fragmento: a grelha do motor (atlas 2D) e
-// a luz da mao sao amostradas aqui e o resultado e interpolado pela rasterizacao. A
-// intensidade e a oclusao continuam a vir da luz vanilla (u_LightTex) -- o ILE so troca
-// o matiz pelo das fontes reais. Sem o define, nao ha nem um uniform extra.
+// ── INFINITIUM LIGHT ENGINE (fiel ao rethinking-voxels) ─────────────────────────────
+// A cor RGB vem da grelha do motor (atlas 2D) avaliada por vertice, com a matematica
+// literal do RV. A luz da mao e somada como outra fonte RV. O modo de cor decide se
+// substitui so o blocklight (mantem o ceu vanilla) ou tudo (sem lightmap). O modo de
+// sombreamento decide se o N.L e por vertice (0), solido via luz vanilla (1) ou por
+// pixel (2 -- passa posicao/direcao ao fragmento). Sem o define, nao ha uniform extra.
 #ifdef INFINITIUM_LIGHT
 uniform highp sampler2D u_InfinitiumTex;   // atlas 2D: X por (Y * Z) celulas RGB
 uniform vec3 u_InfinitiumOrigin;           // canto da grelha, relativo a camera
 uniform vec3 u_InfinitiumScale;            // reciproco do tamanho da grelha
-uniform float u_InfinitiumTint;            // forca da tintura (0..1)
-uniform vec4 u_InfinitiumHand;             // xyz posicao relativa da mao, w intensidade
-uniform vec3 u_InfinitiumHandColor;        // cor do item na mao (paleta ILE)
+uniform vec4 u_InfinitiumHand;             // xyz posicao relativa da mao, w nivel
+uniform vec3 u_InfinitiumHandColor;        // cor do item na mao (paleta RV)
+uniform int u_InfinitiumColorMode;         // 0 = so blocklight, 1 = tudo
+uniform int u_InfinitiumShadingMode;       // 0 = vertice N.L, 1 = solido, 2 = por pixel
 
-/**
- * A cor da luz a volta do ponto, amostrada da grelha do motor.
- *
- * A grelha sobe como atlas 2D: X pixels de largura, um bloco de Y linhas por cada fatia Z.
- * Interpolam-se as duas fatias vizinhas a mao. Textura 3D nao e opcao: o glTexImage3D do
- * MobileGlues tem um crash nativo em alguns aparelhos; 2D RGB8 trata qualquer GLES3.
- */
+// Amostra a grelha do motor num ponto do mundo (atlas 2D com interpolacao entre fatias Z).
 vec3 _infinitium_grid(vec3 worldPos) {
     vec3 gridCoord = (worldPos - u_InfinitiumOrigin) * u_InfinitiumScale;
 
@@ -58,13 +60,40 @@ vec3 _infinitium_grid(vec3 worldPos) {
     vec3 colored = mix(texture(u_InfinitiumTex, vec2(u, v0)).rgb,
                        texture(u_InfinitiumTex, vec2(u, v1)).rgb, fz);
 
-    // Nao espalhar o texel da borda por tudo o que esta fora do volume varrido: queda suave
-    // na fronteira para a luz vanilla, sem popping nem pisca entre fatias.
+    // Queda suave na fronteira do volume varrido: sem popping nem vazar para fora.
     vec3 edgeDist = min(gridCoord, vec3(1.0) - gridCoord);
     float edge = min(min(edgeDist.x, edgeDist.y), edgeDist.z);
     colored *= clamp(edge * 8.0, 0.0, 1.0);
 
     return colored;
+}
+
+float _infinitium_lum(vec3 wp) {
+    vec3 c = _infinitium_grid(wp);
+    return max(max(c.r, c.g), c.b);
+}
+
+// Direcao da luz: gradiente do campo RV (aponta para onde e mais claro = para a fonte).
+vec3 _infinitium_light_dir(vec3 wp) {
+    float e = 1.0;
+    vec3 g = vec3(_infinitium_lum(wp + vec3(e, 0.0, 0.0)) - _infinitium_lum(wp - vec3(e, 0.0, 0.0)),
+                  _infinitium_lum(wp + vec3(0.0, e, 0.0)) - _infinitium_lum(wp - vec3(0.0, e, 0.0)),
+                  _infinitium_lum(wp + vec3(0.0, 0.0, e)) - _infinitium_lum(wp - vec3(0.0, 0.0, e)));
+    float len = length(g);
+    return len > 1.0e-4 ? g / len : vec3(0.0, 1.0, 0.0);
+}
+
+// Normal da face embutida nos bits 3..5 do material (0 = sem face; 1..6 = ModelQuadFacing+1).
+vec3 _infinitium_face_normal(uint material) {
+    uint code = (material >> 3u) & 7u;
+
+    if (code == 1u) return vec3( 1.0,  0.0,  0.0);
+    if (code == 2u) return vec3( 0.0,  1.0,  0.0);
+    if (code == 3u) return vec3( 0.0,  0.0,  1.0);
+    if (code == 4u) return vec3(-1.0,  0.0,  0.0);
+    if (code == 5u) return vec3( 0.0, -1.0,  0.0);
+    if (code == 6u) return vec3( 0.0,  0.0, -1.0);
+    return vec3(0.0);
 }
 #endif
 
@@ -91,26 +120,61 @@ void main() {
     // Transform the vertex position into model-view-projection space
     gl_Position = u_ProjectionMatrix * u_ModelViewMatrix * vec4(position, 1.0);
 
-    // Add the light color to the vertex color, and pass the texture coordinates to the fragment shader
-    v_Color = _vert_color * texture(u_LightTex, _vert_tex_light_coord);
+    // Base vanilla: cor do vertice multiplicada pelo lightmap.
+    vec2 lc = _vert_tex_light_coord;
+    v_Color = _vert_color * texture(u_LightTex, lc);
 
 #ifdef INFINITIUM_LIGHT
-    // S5+S7: a cor das fontes em torno do vertice + a luz da mao (S8, curva da mao provada,
-    // mesmo raio de 12 blocos). A tintura preserva a intensidade vanilla e troca o matiz,
-    // normalizada por canal: duas fontes de cores diferentes combinam sem saturar (S5.4).
-    vec3 ileColor = _infinitium_grid(position);
+    // Luz RV no ponto (grelha) + luz da mao avaliada com a MESMA atenuacao do RV.
+    vec3 rv = _infinitium_grid(position);
 
-    vec3 ileDelta = position - u_InfinitiumHand.xyz;
-    float ileAtt = max(0.0, 1.0 - dot(ileDelta, ileDelta) * (1.0 / 144.0));
-    ileAtt *= ileAtt;
-    ileColor += u_InfinitiumHandColor * (ileAtt * u_InfinitiumHand.w);
+    float handLvl = u_InfinitiumHand.w;
 
-    float ileLum = max(max(ileColor.r, ileColor.g), ileColor.b);
-
-    if (ileLum > 0.004) {
-        vec3 ileTint = ileColor / ileLum;
-        v_Color.rgb *= mix(vec3(1.0), ileTint, clamp(ileLum, 0.0, 1.0) * u_InfinitiumTint);
+    if (handLvl > 0.0) {
+        vec3 delta = position - u_InfinitiumHand.xyz;
+        float dist = length(delta);
+        float f = max(0.0, 1.0 - dist / handLvl);
+        float atten = 0.0625 * handLvl * f * f;
+        rv += u_InfinitiumHandColor * atten;
     }
+
+    // Direcao da luz (gradiente do campo RV) para o sombreamento N.L. No modo solido (1)
+    // nao e necessaria -- poupa-se o custo do gradiente e o modo fica realmente o mais barato.
+    vec3 lightDir = vec3(0.0, 1.0, 0.0);
+
+    if (u_InfinitiumShadingMode != 1) {
+        lightDir = _infinitium_light_dir(position);
+    }
+
+    // Sombreamento por vertice (modo 0): N.L com a normal da face; costas suavizadas.
+    float shade = 1.0;
+
+    if (u_InfinitiumShadingMode == 0) {
+        vec3 nrm = _infinitium_face_normal(_material_params);
+
+        if (nrm != vec3(0.0)) {
+            float ndl = max(0.0, dot(nrm, lightDir));
+            shade = mix(1.0, ndl, 0.7);
+        }
+    }
+
+    // Modo de cor: 0 = so blocklight (mantem o ceu vanilla); 1 = tudo (sem lightmap).
+    vec3 lightResult;
+
+    if (u_InfinitiumColorMode == 0) {
+        vec3 skyPart = texture(u_LightTex, vec2(0.0, lc.y)).rgb; // so a componente de ceu
+        lightResult = skyPart + rv * shade;
+    } else {
+        float sky = pow(clamp(lc.y * (16.0 / 15.0), 0.0, 1.0), 1.3);
+        vec3 skyAmb = sky * vec3(1.0, 0.98, 0.95);
+        lightResult = skyAmb + rv * shade;
+    }
+
+    v_Color = vec4(_vert_color.rgb * lightResult, _vert_color.a);
+
+    // Para o modo N.L por pixel (2), o fragmento precisa da posicao e da direcao da luz.
+    v_InfWorldPos = position;
+    v_InfLightDir = lightDir;
 #endif
 
     v_TexCoord = (_vert_tex_diffuse_coord_bias * u_TexCoordShrink) + _vert_tex_diffuse_coord; // FMA for precision
