@@ -15,6 +15,8 @@ import me.jellysquid.mods.sodium.mixin.core.render.texture.SpriteAtlasTextureAcc
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.SpriteAtlasTexture;
 import net.minecraft.util.math.Vec3d;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.joml.Matrix4fc;
 import org.lwjgl.opengl.GL32C;
 
@@ -25,6 +27,8 @@ import java.util.Map;
  * A forward-rendering shader program for chunks.
  */
 public class ChunkShaderInterface {
+    private static final Logger LOGGER = LogManager.getLogger("InfinitiumLightEngine");
+
     private final Map<ChunkShaderTextureSlot, GlUniformInt> uniformTextures;
 
     private final GlUniformMatrix4f uniformModelViewMatrix;
@@ -66,6 +70,10 @@ public class ChunkShaderInterface {
             this.uniformInfinitiumTint = context.bindUniform("u_InfinitiumTint", GlUniformFloat::new);
             this.uniformInfinitiumHand = context.bindUniform("u_InfinitiumHand", GlUniformFloat4v::new);
             this.uniformInfinitiumHandColor = context.bindUniform("u_InfinitiumHandColor", GlUniformFloat3v::new);
+
+            // bindTexture() resolve o sampler pelo mapa: sem esta entrada, o slot INF daria NPE
+            // no primeiro frame (foi exactamente o crash build.81 no aparelho).
+            this.uniformTextures.put(ChunkShaderTextureSlot.INF, this.uniformInfinitiumTex);
         } else {
             this.uniformInfinitiumTex = null;
             this.uniformInfinitiumOrigin = null;
@@ -105,34 +113,50 @@ public class ChunkShaderInterface {
         this.fogShader.setup();
     }
 
+    private boolean infinitiumStateFailed;
+
     /**
      * INFINITIUM LIGHT ENGINE (S7/S8). A grelha vive na unidade 2 (0 atlas, 1 lightmap); a
      * origem e camera-relativa porque o vertex shader trabalha nesse espaco. A luz da mao e
      * lida por frame, ja que depende da posicao da camera e do item na mao.
+     *
+     * <p>Nada aqui pode rebentar o render: uma falha (uniform inexistente num driver estranho,
+     * textura nao criada) desliga o caminho do ILE para este programa e o terreno continua a
+     * ser desenhado com os valores por omissao.
      */
     private void setupInfinitiumState() {
-        this.bindTexture(ChunkShaderTextureSlot.INF, InfinitiumLightEngine.getTextureId());
+        if (this.infinitiumStateFailed) {
+            return;
+        }
 
-        Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
+        try {
+            this.bindTexture(ChunkShaderTextureSlot.INF, InfinitiumLightEngine.getTextureId());
 
-        this.uniformInfinitiumTex.setInt(ChunkShaderTextureSlot.INF.ordinal());
+            Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
 
-        this.uniformInfinitiumOrigin.set(
-                InfinitiumLightEngine.getOriginX() - (float) cameraPos.x,
-                InfinitiumLightEngine.getOriginY() - (float) cameraPos.y,
-                InfinitiumLightEngine.getOriginZ() - (float) cameraPos.z);
+            this.uniformInfinitiumOrigin.set(
+                    InfinitiumLightEngine.getOriginX() - (float) cameraPos.x,
+                    InfinitiumLightEngine.getOriginY() - (float) cameraPos.y,
+                    InfinitiumLightEngine.getOriginZ() - (float) cameraPos.z);
 
-        this.uniformInfinitiumScale.set(
-                InfinitiumLightEngine.getScaleX(),
-                InfinitiumLightEngine.getScaleY(),
-                InfinitiumLightEngine.getScaleZ());
+            this.uniformInfinitiumScale.set(
+                    InfinitiumLightEngine.getScaleX(),
+                    InfinitiumLightEngine.getScaleY(),
+                    InfinitiumLightEngine.getScaleZ());
 
-        this.uniformInfinitiumTint.setFloat(InfinitiumLightEngine.getTintStrength());
+            this.uniformInfinitiumTint.setFloat(InfinitiumLightEngine.getTintStrength());
 
-        InfinitiumLightEngine.writeHandLight(cameraPos, HAND_LIGHT, HAND_COLOR);
+            InfinitiumLightEngine.writeHandLight(cameraPos, HAND_LIGHT, HAND_COLOR);
 
-        this.uniformInfinitiumHand.set(HAND_LIGHT);
-        this.uniformInfinitiumHandColor.set(HAND_COLOR);
+            this.uniformInfinitiumHand.set(HAND_LIGHT);
+            this.uniformInfinitiumHandColor.set(HAND_COLOR);
+        } catch (Throwable throwable) {
+            this.infinitiumStateFailed = true;
+
+            InfinitiumLightEngine.markShaderFailed();
+            LOGGER.error("ILE: falha ao configurar o estado do shader; caminho desligado " +
+                    "(o terreno continua a renderizar)", throwable);
+        }
     }
 
     @Deprecated(forRemoval = true) // should be handled properly in GFX instead.
