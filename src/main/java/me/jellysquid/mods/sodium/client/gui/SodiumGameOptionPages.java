@@ -11,6 +11,7 @@ import me.jellysquid.mods.sodium.client.gui.options.control.SliderControl;
 import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
 import me.jellysquid.mods.sodium.client.gui.options.storage.MinecraftOptionsStorage;
 import me.jellysquid.mods.sodium.client.gui.options.storage.SodiumOptionsStorage;
+import me.jellysquid.mods.sodium.client.render.MGRendererControl;
 import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds;
 import net.minecraft.client.MinecraftClient;
@@ -376,6 +377,35 @@ public class SodiumGameOptionPages {
                         .setBinding((opts, value) -> opts.performance.sortSubDraws = value, opts -> opts.performance.sortSubDraws)
                         .build())
                 .build());
+
+        // Interruptores do pipeline proprio do MobileGlues, ao vivo. Nao sao
+        // opcoes do Sodium: o setter so enfileira um pedido atomico na
+        // libmobileglues, que o proximo eglSwapBuffers aplica na thread de
+        // render com o contexto corrente -- logo o valor novo vale no frame
+        // seguinte, sem reiniciar o jogo nem recarregar o renderer. Por isso
+        // nao ha REQUIRES_RENDERER_RELOAD aqui. Os getters leem o estado real
+        // da lib, por isso o menu abre sempre a mostrar o que esta a correr.
+        if (MGRendererControl.isSupported()) {
+            groups.add(OptionGroup.createBuilder()
+                    .add(OptionImpl.createBuilder(MGRendererControl.Fsr1Preset.class, sodiumOpts)
+                            .setName(Text.literal("FSR1 (MobileGlues)"))
+                            .setTooltip(Text.literal("Upscale FSR1 (EASU + RCAS) feito pelo proprio MobileGlues no swap: o jogo renderiza ABAIXO da resolucao da janela (o preset escolhido) e o upscale sobe para a superficie. O blit final e medido na GE8320 a 2.483 ms contra 2.639 ms nativo a 50%.\n\nCada preset e a percentagem da resolucao da janela: Ultra 77%, Quality 66%, Balanced 59%, Performance 50%. Desligado: o back buffer vai direto ao display.\n\nEfeito no frame seguinte, sem reiniciar."))
+                            .setControl(option -> new CyclingControl<>(option, MGRendererControl.Fsr1Preset.class,
+                                    new Text[] { Text.literal("Desligado"), Text.literal("Ultra 77%"), Text.literal("Quality 66%"), Text.literal("Balanced 59%"), Text.literal("Performance 50%") }))
+                            .setImpact(OptionImpact.HIGH)
+                            .setBinding((opts, value) -> MGRendererControl.setFsr1(value), opts -> MGRendererControl.currentFsr1())
+                            .build()
+                    )
+                    .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                            .setName(Text.literal("Frame Generation (MobileGlues)"))
+                            .setTooltip(Text.literal("Apresenta um frame interpolado entre cada dois frames reais (troca cronologica: N-1, interp, N). O custo medido da interpolacao e de 0.347 ms por frame na GE8320.\n\nCombina melhor com V-Sync ligado: com ele as duas trocas cabem entre os vSyncs e o resultado e o dobro de frames vistos com o mesmo trabalho de render.\n\nEfeito no frame seguinte, sem reiniciar."))
+                            .setControl(TickBoxControl::new)
+                            .setImpact(OptionImpact.HIGH)
+                            .setBinding((opts, value) -> MGRendererControl.setFramegen(value), opts -> MGRendererControl.currentFramegen())
+                            .build()
+                    )
+                    .build());
+        }
 
         return new OptionPage(Text.translatable("sodium.options.pages.performance"), ImmutableList.copyOf(groups));
     }
