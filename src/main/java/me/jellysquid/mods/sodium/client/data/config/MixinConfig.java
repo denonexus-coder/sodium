@@ -31,6 +31,9 @@ public class MixinConfig {
 
         this.addMixinRule("debug.checks", false);
 
+        this.addMixinRule("compat", true);
+        this.addMixinRule("compat.sodiumextra", true);
+
         this.addMixinRule("features", true);
 
         this.addMixinRule("features.gui", true);
