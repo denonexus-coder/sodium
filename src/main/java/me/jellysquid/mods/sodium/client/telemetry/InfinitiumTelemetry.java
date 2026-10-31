@@ -20,8 +20,10 @@ import org.apache.logging.log4j.Logger;
  *          chegadas, medido em ClientPlayNetworkHandler.scheduleRenderChunk.
  *   MSH  - tempo de montagem das malhas nas threads do Sodium
  *          (ChunkBuilderMeshingTask.execute).
- *   GPU  - tempo do SuperDrawer vindo do MobileGlues por JNI (timer de hardware
- *          GL_EXT_timer_query quando a GE8320 o suporta, submissao senao).
+ *   GPU  - tempo de submissao do SuperDrawer vindo do MobileGlues por JNI
+ *          (modo wall-clock/CPU: a GE8320 nao expoe GL_EXT_disjoint_timer_query
+ *          nem GL_EXT_timer_query -- o overlay exibe "(CPU)" ao lado do valor
+ *          para deixar claro que e tempo de submissao na CPU, nao execucao GPU).
  *   FG   - estado do frame generation + FPS real do loop de render.
  *
  * Truques emprestados do spark, todos ultra-leves:
