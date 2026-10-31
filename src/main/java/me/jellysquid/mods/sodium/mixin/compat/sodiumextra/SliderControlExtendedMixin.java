@@ -29,8 +29,15 @@ public class SliderControlExtendedMixin {
     // argsOnly: entre os argumentos int (min, max, interval), o ordinal 1 e o max.
     // require = 0: se uma versao futura mudar a assinatura, fica sem o fix em vez
     // de rebentar o arranque -- o efeito e entao o crash original do Sodium Extra.
+    //
+    // O handler PRECISA ser static: @At("HEAD") num construtor e antes do
+    // super(), ponto em que `this` ainda nao existe -- o mixin 0.8.7 (Fabric
+    // Loader 0.19.x) derruba o apply com
+    // "@ModifyVariable handler before super() invocation must be static"
+    // (reprovou em jogo no build.91; o CI so compila). O metodo nao usa
+    // estado de instancia, entao static e seguro.
     @ModifyVariable(method = "<init>", at = @At("HEAD"), argsOnly = true, ordinal = 1, require = 0)
-    private int sodiumextra$clampDegenerateUpperBound(int max) {
+    private static int sodiumextra$clampDegenerateUpperBound(int max) {
         return Math.max(max, 1);
     }
 }
