@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
 import me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import me.jellysquid.mods.sodium.client.render.framegen.FrameGenBridge;
 import me.jellysquid.mods.sodium.client.render.viewport.ViewportProvider;
 import me.jellysquid.mods.sodium.client.util.FlawlessFrames;
 import me.jellysquid.mods.sodium.client.world.WorldRendererExtended;
@@ -100,6 +101,11 @@ public abstract class WorldRendererMixin implements WorldRendererExtended {
      */
     @Overwrite
     private void renderLayer(RenderLayer renderLayer, MatrixStack matrices, double x, double y, double z, Matrix4f projection) {
+        // Infinitium FrameGen: entrega ao MobileGlues a ViewProj exata deste
+        // frame (a mesma que vira ChunkRenderMatrices abaixo) e a camera, no
+        // unico ponto onde os dois valores ja estao prontos para desenhar.
+        FrameGenBridge.onWorldMatrices(projection, matrices);
+
         RenderDevice.enterManagedCode();
 
         try {
