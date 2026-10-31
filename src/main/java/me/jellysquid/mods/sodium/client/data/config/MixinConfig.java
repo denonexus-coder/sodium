@@ -83,6 +83,9 @@ public class MixinConfig {
         this.addMixinRule("features.shader", true);
         this.addMixinRule("features.shader.uniform", true);
 
+        // Overlay Infinitium Telemetry (diagnostico SRV/CHK/MSH/GPU/FG)
+        this.addMixinRule("features.telemetry", true);
+
         this.addMixinRule("features.textures", true);
         this.addMixinRule("features.textures.animations", true);
         this.addMixinRule("features.textures.mipmaps", true);

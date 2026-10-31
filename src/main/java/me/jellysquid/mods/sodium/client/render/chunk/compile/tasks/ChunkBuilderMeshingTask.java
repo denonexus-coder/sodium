@@ -11,6 +11,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
 import me.jellysquid.mods.sodium.client.render.chunk.data.BuiltSectionMeshParts;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
+import me.jellysquid.mods.sodium.client.telemetry.InfinitiumTelemetry;
 import me.jellysquid.mods.sodium.client.util.task.CancellationToken;
 import me.jellysquid.mods.sodium.client.world.WorldSlice;
 import me.jellysquid.mods.sodium.client.world.cloned.ChunkRenderContext;
@@ -50,6 +51,16 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
     @Override
     public ChunkBuildOutput execute(ChunkBuildContext buildContext, CancellationToken cancellationToken) {
+        // Infinitium Telemetry: tempo de montagem da malha (MSH).
+        //
+        // O gate e lido uma unica vez aqui em cima: com o overlay desligado o
+        // custo e um getstatic e um branch que nem entra. Os cancelamentos
+        // (return null la embaixo) nao registram nada de proposito -- queremos o
+        // tempo das montagens que viraram malha de verdade. Cada worker tem o
+        // seu nanoTime, e a perda de passo do EWMA entre threads e inofensiva.
+        final boolean telemetry = InfinitiumTelemetry.isEnabled();
+        final long telemetryStart = telemetry ? System.nanoTime() : 0L;
+
         BuiltSectionInfo.Builder renderData = new BuiltSectionInfo.Builder();
         ChunkOcclusionDataBuilder occluder = new ChunkOcclusionDataBuilder();
 
@@ -147,6 +158,10 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         }
 
         renderData.setOcclusionData(occluder.build());
+
+        if (telemetry) {
+            InfinitiumTelemetry.recordMeshMs((System.nanoTime() - telemetryStart) / 1.0e6);
+        }
 
         return new ChunkBuildOutput(this.render, renderData.build(), meshes, this.buildTime);
     }

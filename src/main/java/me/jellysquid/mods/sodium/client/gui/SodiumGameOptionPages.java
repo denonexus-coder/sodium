@@ -12,6 +12,8 @@ import me.jellysquid.mods.sodium.client.gui.options.control.TickBoxControl;
 import me.jellysquid.mods.sodium.client.gui.options.storage.MinecraftOptionsStorage;
 import me.jellysquid.mods.sodium.client.gui.options.storage.SodiumOptionsStorage;
 import me.jellysquid.mods.sodium.client.render.MGRendererControl;
+import me.jellysquid.mods.sodium.client.render.framegen.FrameGenBridge;
+import me.jellysquid.mods.sodium.client.telemetry.InfinitiumTelemetry;
 import me.jellysquid.mods.sodium.client.util.FrameTrace;
 import net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds;
 import net.minecraft.client.MinecraftClient;
@@ -406,6 +408,24 @@ public class SodiumGameOptionPages {
                     )
                     .build());
         }
+
+        // Overlay Infinitium Telemetry: diagnostico em tempo real no canto
+        // superior esquerdo (SRV/CHK/MSH/GPU/FG). Opt-in -- por padrao o
+        // overlay e o timer do SuperDrawer estao desligados e o custo por frame
+        // e apenas um teste de boolean. O binding liga/desliga o overlay Java e
+        // o medidor nativo em uma tacada; nao ha REQUIRES_RENDERER_RELOAD porque
+        // nada do renderer muda (o setter so poe um atomico la no MobileGlues).
+        // Sem persistencia de propósito: e uma ferramenta de diagnostico, nao
+        // uma preferencia de gameplay.
+        groups.add(OptionGroup.createBuilder()
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Overlay de Telemetria (Infinitium)"))
+                        .setTooltip(Text.literal("Diagnostico em tempo real no canto superior esquerdo, com cores tipo spark (verde/amarelo/laranja/vermelho):\n\nSRV: MSPT do servidor integrado e TPS (— em multiplayer, sem servidor local).\nCHK: chunks entregues ao render por segundo e a cadencia entre chegadas.\nMSH: tempo de montagem das malhas nas threads do Sodium.\nGPU: tempo do SuperDrawer medido na propria GPU (HW) ou por submissao (CPU).\nFG: estado do frame generation e o FPS real.\n\nCusto quando desligado: praticamente zero (um teste por frame). Ligado custa ~6 linhas de texto e um JNI curto por frame.\n\nNao persiste: volta a desligar ao reiniciar."))
+                        .setControl(TickBoxControl::new)
+                        .setBinding((opts, value) -> InfinitiumTelemetry.setEnabled(value), opts -> InfinitiumTelemetry.isEnabled())
+                        .build()
+                )
+                .build());
 
         return new OptionPage(Text.translatable("sodium.options.pages.performance"), ImmutableList.copyOf(groups));
     }

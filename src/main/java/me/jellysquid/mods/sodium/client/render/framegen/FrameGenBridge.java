@@ -74,6 +74,31 @@ public final class FrameGenBridge {
 
     public static native void nativeBindDepthTexture(int depthTextureId);
 
+    // ---- Natives de telemetria (Infinitium Telemetry) ----
+    // Resolvem na mesma libmobileglues.so (fg_jni_bridge.cpp), mas guardam um
+    // estado de link SEPARADO do framegen: com um .so antigo (sem estas
+    // entradas) apenas a linha GPU do overlay fica em "—" -- o framegen e as
+    // matrizes continuam funcionando.
+
+    /**
+     * Tempo do ultimo lote do SuperDrawer acumulado desde a ultima leitura, em
+     * milissegundos. Retorna -1 quando nao ha dado (overlay ligado antes de
+     * qualquer lote, lib sem a entrada, ou janela sem chamadas de desenho).
+     *
+     * <p>Chamado uma vez por frame pelo overlay; a troca la dentro e um
+     * exchange atomico (custo de um JNI curto, ~microssegundos).</p>
+     */
+    public static native float nativeGetGpuDrawerTimeMs();
+
+    /** -1 = ainda nao mediu, 0 = submissao (parede), 1 = timer de hardware. */
+    public static native int nativeGetGpuTimerMode();
+
+    /**
+     * Liga/desliga a medicao do SuperDrawer no lado nativo (opt-in: quando
+     * desligado, Drawer::draw nao abre nem fecha query nenhuma).
+     */
+    public static native void nativeSetTelemetryEnabled(boolean enabled);
+
     /** False apos o primeiro erro de link: a lib antiga nao conhece estes natives. */
     public static boolean isSupported() {
         return nativeLoaded;
@@ -159,6 +184,56 @@ public final class FrameGenBridge {
             nativeBindDepthTexture(depthTextureId);
         } catch (UnsatisfiedLinkError | NoClassDefFoundError e) {
             nativeLoaded = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Wrappers de telemetria (flag propia: ver comentario das natives)
+    // ------------------------------------------------------------------
+
+    private static boolean telemetryLoaded = true;
+
+    /** Milissegundos do SuperDrawer na ultima janela, ou -1 sem dado. */
+    public static float gpuDrawerTimeMs() {
+        if (!telemetryLoaded) {
+            return -1.0f;
+        }
+
+        try {
+            return nativeGetGpuDrawerTimeMs();
+        } catch (UnsatisfiedLinkError | NoClassDefFoundError e) {
+            telemetryLoaded = false;
+            return -1.0f;
+        }
+    }
+
+    /** Modo de medicao: -1 sem dado, 0 parede, 1 timer HW. */
+    public static int gpuTimerMode() {
+        if (!telemetryLoaded) {
+            return -1;
+        }
+
+        try {
+            return nativeGetGpuTimerMode();
+        } catch (UnsatisfiedLinkError | NoClassDefFoundError e) {
+            telemetryLoaded = false;
+            return -1;
+        }
+    }
+
+    /**
+     * Opt-in do timer do SuperDrawer no MobileGlues. Nunca lanca: se a lib for
+     * antiga apenas ignora (o custo do overlay e so Java entao).
+     */
+    public static void setTelemetryEnabled(boolean enabled) {
+        if (!telemetryLoaded) {
+            return;
+        }
+
+        try {
+            nativeSetTelemetryEnabled(enabled);
+        } catch (UnsatisfiedLinkError | NoClassDefFoundError e) {
+            telemetryLoaded = false;
         }
     }
 }
