@@ -43,6 +43,19 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
     private final int buildTime;
 
+    // Infinitium Telemetry (MSH): guard e timestamp vivem em CAMPOS, nunca em
+    // locais de execute(). Locais novos no LVT do metodo desalinhavam o
+    // @Inject de captura de locais da Iris
+    // (mixins.iris.compat.sodium.json -> block_id.MixinChunkRenderRebuildTask
+    // .iris$setLocalPos, CAPTURE_FAILHARD): a mixin abortava com "LVT ...
+    // has incompatible changes at opcode", a transformacao da CLASSE INTEIRA
+    // falhava e o mundo nao abria (crash na entrada do servidor integrado).
+    // Campos nao entram no LVT, entao o LVT de execute() volta a ser o do
+    // Sodium original que a Iris espera. Cada task e executada uma unica vez
+    // por uma unica worker, entao ha zero corrida em cima destes campos.
+    private boolean telemetryEnabled;
+    private long telemetryStart;
+
     public ChunkBuilderMeshingTask(RenderSection render, ChunkRenderContext renderContext, int time) {
         this.render = render;
         this.renderContext = renderContext;
@@ -58,8 +71,13 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         // (return null la embaixo) nao registram nada de proposito -- queremos o
         // tempo das montagens que viraram malha de verdade. Cada worker tem o
         // seu nanoTime, e a perda de passo do EWMA entre threads e inofensiva.
-        final boolean telemetry = InfinitiumTelemetry.isEnabled();
-        final long telemetryStart = telemetry ? System.nanoTime() : 0L;
+        //
+        // ATENCAO: gate e timestamp sao CAMPOS (telemetryEnabled/telemetryStart),
+        // nao locais -- ver o comentario la em cima: locais novos no LVT de
+        // execute() quebram o @Inject de captura de locais da Iris e o mundo
+        // nao abre.
+        this.telemetryEnabled = InfinitiumTelemetry.isEnabled();
+        this.telemetryStart = this.telemetryEnabled ? System.nanoTime() : 0L;
 
         BuiltSectionInfo.Builder renderData = new BuiltSectionInfo.Builder();
         ChunkOcclusionDataBuilder occluder = new ChunkOcclusionDataBuilder();
@@ -159,8 +177,8 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
         renderData.setOcclusionData(occluder.build());
 
-        if (telemetry) {
-            InfinitiumTelemetry.recordMeshMs((System.nanoTime() - telemetryStart) / 1.0e6);
+        if (this.telemetryEnabled) {
+            InfinitiumTelemetry.recordMeshMs((System.nanoTime() - this.telemetryStart) / 1.0e6);
         }
 
         return new ChunkBuildOutput(this.render, renderData.build(), meshes, this.buildTime);
