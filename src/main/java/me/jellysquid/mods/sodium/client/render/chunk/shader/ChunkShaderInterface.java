@@ -44,6 +44,21 @@ public class ChunkShaderInterface {
         this.fogShader = options.fog().getFactory().apply(context);
     }
 
+    // Compat binario: o Iris fork (Iris-shaders-gles-suport 1.7.6+mc1.20.1,
+    // IrisChunkShaderInterface) estende esta classe chamando
+    // super(context, options, surfaceReflection, makeupProfile) -- os dois
+    // booleanos vem da linha dev do fork, onde essas features existem, e o
+    // Iris sempre passa false/false (o programa orientado ao pack precisa do
+    // bind de u_LightTex que o perfil MakeUp pulpa, e o caminho de reflexo fica
+    // desligado com Iris carregado). Main nao tem nenhuma das duas, entao
+    // delegar para o construtor canonico e a semantica exata. Sem este
+    // sobrecarregamento o override de shader de chunks do Iris morria com
+    // NoSuchMethodError na construcao do programa.
+    public ChunkShaderInterface(ShaderBindingContext context, ChunkShaderOptions options,
+                                boolean surfaceReflection, boolean makeupProfile) {
+        this(context, options);
+    }
+
     @Deprecated // the shader interface should not modify pipeline state
     public void setupState() {
         this.bindTexture(ChunkShaderTextureSlot.BLOCK, TextureUtil.getBlockTextureId());
