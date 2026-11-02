@@ -10,6 +10,7 @@ import me.jellysquid.mods.sodium.client.gl.util.EnumBitField;
 import net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils;
 import net.minecraft.client.render.BufferRenderer;
 import org.lwjgl.opengl.*;
+import me.jellysquid.mods.sodium.client.render.MGNativeDrawer;
 
 import java.nio.ByteBuffer;
 
@@ -284,6 +285,17 @@ public class GLRenderDevice implements RenderDevice {
         @Override
         public void multiDrawElementsBaseVertex(MultiDrawBatch batch, GlIndexType indexType) {
             GlPrimitiveType primitiveType = GLRenderDevice.this.activeTessellation.getPrimitiveType();
+
+            if (MGNativeDrawer.isSupported()) {
+                MGNativeDrawer.drawBatchZeroCopy(
+                        0, 0, 0, indexType.getFormatId(),
+                        batch.pElementCount,
+                        batch.pElementPointer,
+                        batch.pBaseVertex,
+                        batch.size(),
+                        0.0f, false, 0.0f);
+                return;
+            }
 
             GL32C.nglMultiDrawElementsBaseVertex(primitiveType.getId(),
                     batch.pElementCount,

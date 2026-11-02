@@ -1,6 +1,10 @@
 package me.jellysquid.mods.sodium.client.render;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 public class MGNativeDrawer {
+    private static final Logger LOGGER = LogManager.getLogger("Sodium-MGNativeDrawer");
     private static boolean supported = false;
     private static boolean checked = false;
 
@@ -11,11 +15,14 @@ public class MGNativeDrawer {
             int drawCount,
             float serverTickMs, boolean gcImminent, float cameraDeltaRot);
 
-    static void load() {
+    static synchronized void load() {
+        if (checked) return;
         try {
-            isNativeReady();
-            supported = true;
-        } catch (UnsatisfiedLinkError ignored) {
+            supported = isNativeReady();
+            if (supported) {
+                LOGGER.info("[Sodium] MGNativeDrawer CONECTADO com sucesso ao MobileGlues! Ultra Drawer Zero-Copy ativado.");
+            }
+        } catch (UnsatisfiedLinkError | NoClassDefFoundError ignored) {
             supported = false;
         }
         checked = true;
