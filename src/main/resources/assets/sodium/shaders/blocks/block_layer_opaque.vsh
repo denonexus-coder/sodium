@@ -31,7 +31,7 @@ uvec3 _get_relative_chunk_coord(uint pos) {
 }
 
 vec3 _get_draw_translation(uint pos) {
-    return _get_relative_chunk_coord(pos) * vec3(16.0);
+    return vec3(_get_relative_chunk_coord(pos)) * vec3(16.0);
 }
 
 void main() {
