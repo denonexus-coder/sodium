@@ -1,14 +1,11 @@
-#version 330 core
+#version 320 es
 
-#import <sodium:include/fog.glsl>
-#import <sodium:include/chunk_vertex.glsl>
-#import <sodium:include/chunk_matrices.glsl>
-#import <sodium:include/chunk_material.glsl>
+#include "../include/fog.glsl"
+#include "../include/chunk_vertex.glsl"
+#include "../include/chunk_matrices.glsl"
+#include "../include/chunk_material.glsl"
 
-// MobileGlues Ultra Drawer UBO (binding 3)
-layout(std140) uniform ChunkData {
-    uvec4 subDrawOffsets[4096];
-};
+// MobileGlues Ultra Drawer UBO (binding 0 via chunk_vertex.glsl include)
 
 out vec4 v_Color;
 out vec2 v_TexCoord;

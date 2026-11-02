@@ -1,6 +1,7 @@
-#version 330 core
+#version 320 es
+precision mediump float;
 
-#import <sodium:include/fog.glsl>
+#include "../include/fog.glsl"
 
 in vec4 v_Color; // The interpolated vertex color
 in vec2 v_TexCoord; // The interpolated block texture coordinates

@@ -1,3 +1,7 @@
+layout(std140, binding = 0) uniform ChunkData {
+    uvec4 u_baseVertices[512];
+};
+
 // The position of the vertex around the model origin
 vec3 _vert_position;
 
