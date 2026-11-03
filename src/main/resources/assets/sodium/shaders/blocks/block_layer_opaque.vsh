@@ -1,6 +1,17 @@
 #version 320 es
 
-#include "../include/fog.glsl"
+const int FOG_SHAPE_SPHERICAL = 0;
+const int FOG_SHAPE_CYLINDRICAL = 1;
+
+float getFragDistance(int fogShape, vec3 position) {
+    // Use the maximum of the horizontal and vertical distance to get cylindrical fog if fog shape is cylindrical
+    switch (fogShape) {
+        case FOG_SHAPE_SPHERICAL: return length(position);
+        case FOG_SHAPE_CYLINDRICAL: return max(length(position.xz), abs(position.y));
+        default: return length(position); // This shouldn't be possible to get, but return a sane value just in case
+    }
+}
+
 layout(std140, binding = 0) uniform ChunkData {
     uvec4 u_baseVertices[512];
 };
@@ -71,8 +82,28 @@ void _vert_init() {
 #else
 #error "Vertex compression must be enabled"
 #endif
-#include "../include/chunk_matrices.glsl"
-#include "../include/chunk_material.glsl"
+
+// The projection matrix
+uniform mat4 u_ProjectionMatrix;
+
+// The model-view matrix
+uniform mat4 u_ModelViewMatrix;
+
+// The model-view-projection matrix
+#define u_ModelViewProjectionMatrix (uProjectionMatrix * u_ModelViewMatrix)
+
+const uint MATERIAL_USE_MIP_OFFSET = 0u;
+const uint MATERIAL_ALPHA_CUTOFF_OFFSET = 1u;
+
+const float[4] ALPHA_CUTOFF = float[4](0.0, 0.1, 0.5, 1.0);
+
+float _material_mip_bias(uint material) {
+    return ((material >> MATERIAL_USE_MIP_OFFSET) & 1u) != 0u ? 0.0 : -4.0;
+}
+
+float _material_alpha_cutoff(uint material) {
+    return ALPHA_CUTOFF[(material >> MATERIAL_ALPHA_CUTOFF_OFFSET) & 3u];
+}
 
 // MobileGlues Ultra Drawer UBO (binding 0 via chunk_vertex.glsl include)
 
