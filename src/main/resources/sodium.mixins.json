@@ -10,6 +10,11 @@
     "conformVisibility": true
   },
   "client": [
+    "asmd.BlockEntityCountMixin",
+    "asmd.EntityRendererMixin",
+    "asmd.PlayerTickMixin",
+    "asmd.RenderLoopMixin",
+    "asmd.SodiumChunkQueueMixin",
     "compat.sodiumextra.SliderControlExtendedMixin",
     "core.MinecraftClientMixin",
     "core.WindowMixin",

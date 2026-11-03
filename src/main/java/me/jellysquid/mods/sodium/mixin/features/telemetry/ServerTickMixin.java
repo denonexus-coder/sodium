@@ -1,5 +1,6 @@
 package me.jellysquid.mods.sodium.mixin.features.telemetry;
 
+import me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge;
 import me.jellysquid.mods.sodium.client.telemetry.InfinitiumTelemetry;
 import net.minecraft.server.MinecraftServer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,6 +23,13 @@ import java.util.function.BooleanSupplier;
  *
  * Em multiplayer a Server thread nao existe no cliente: o SRV fica — (sem
  * servidor local) e as outras linhas continuam valendo.
+ *
+ * Alem da HUD de telemetria, o mesmo intervalo alimenta a ASMD (offsets 0 e 4
+ * do buffer de 128 bytes): o co-processador corta o merge de sub-draws quando o
+ * server tick passa de 35 ms, entao precisa do MSPT mesmo com a HUD desligada.
+ * Por isso a medição roda sempre -- a sobrecarga continua sendo os mesmos dois
+ * nanoTime por tick, e o {@link InfinitiumTelemetry} mantem o proprio gate de
+ * {@code enabled} la dentro.
  */
 @Mixin(MinecraftServer.class)
 public class ServerTickMixin {
@@ -30,9 +38,7 @@ public class ServerTickMixin {
 
     @Inject(method = "tick(Ljava/util/function/BooleanSupplier;)V", at = @At("HEAD"))
     private void telemetry$onTickStart(BooleanSupplier shouldKeepTicking, CallbackInfo ci) {
-        if (InfinitiumTelemetry.isEnabled()) {
-            this.telemetry$tickStart = System.nanoTime();
-        }
+        this.telemetry$tickStart = System.nanoTime();
     }
 
     @Inject(method = "tick(Ljava/util/function/BooleanSupplier;)V", at = @At("RETURN"))
@@ -40,8 +46,17 @@ public class ServerTickMixin {
         long start = this.telemetry$tickStart;
         this.telemetry$tickStart = 0L;
 
-        if (start != 0L) {
-            InfinitiumTelemetry.recordServerTickMs((System.nanoTime() - start) / 1.0e6);
+        if (start == 0L) {
+            return;
         }
+
+        float ms = (float) ((System.nanoTime() - start) / 1.0e6);
+
+        ASMDJavaBridge.setServerTickTimeMs(ms);
+        // 1000 ms = 20 TPS; acima de 20 o servidor nao consegue, entao trava no
+        // maximo. ms <= 0.05 nao divide por zero (guarda contra tick degenerado).
+        ASMDJavaBridge.setServerTps(ms > 0.05f ? Math.min(20.0f, 1000.0f / ms) : 20.0f);
+
+        InfinitiumTelemetry.recordServerTickMs(ms);
     }
 }

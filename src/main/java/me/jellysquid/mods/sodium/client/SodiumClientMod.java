@@ -5,6 +5,9 @@ import me.jellysquid.mods.sodium.client.data.fingerprint.FingerprintMeasure;
 import me.jellysquid.mods.sodium.client.data.fingerprint.HashedFingerprint;
 import me.jellysquid.mods.sodium.client.gui.console.Console;
 import me.jellysquid.mods.sodium.client.gui.console.message.MessageLevel;
+import me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge;
+import me.jellysquid.mods.sodium.client.render.asmd.ASMDNativeBridge;
+import me.jellysquid.mods.sodium.client.render.asmd.GCMonitorThread;
 import me.jellysquid.mods.sodium.client.util.FlawlessFrames;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
@@ -36,11 +39,37 @@ public class SodiumClientMod implements ClientModInitializer {
 
         FlawlessFrames.onClientInitialization();
 
+        initAsmdTelemetry();
+
         try {
             updateFingerprint();
         } catch (Throwable t) {
             LOGGER.error("Failed to update fingerprint", t);
         }
+    }
+
+    /**
+     * ASMD — publica o buffer de telemetria (128 B, off-heap) para o
+     * co-processador em C++ e sobe o monitor de GC em thread própria.
+     *
+     * <p>O handshake JNI pode falhar aqui de propósito: o Fabric init roda
+     * antes de a janela GL nascer, e a libmobileglues.so só é carregada junto
+     * com a ponte EGL/GLES. Nesse caso o {@code RenderLoopMixin} repete a
+     * tentativa nos frames seguintes — ver {@code ASMDNativeBridge.init()}.
+     */
+    private void initAsmdTelemetry() {
+        // Sem DRS ativo o viewport é nativo: escala 1.0. (Não existe resolução
+        // dinâmica no código — FSR1 está fora do escopo da ASMD.)
+        ASMDJavaBridge.setDrsViewportScale(1.0f);
+
+        if (ASMDNativeBridge.init()) {
+            LOGGER.info("[Sodium] ASMD: buffer de telemetria registrado no co-processador nativo.");
+        } else {
+            LOGGER.info("[Sodium] ASMD: ponte JNI ainda indisponível no boot; " +
+                    "tentando de novo no primeiro frame.");
+        }
+
+        GCMonitorThread.startMonitor();
     }
 
     public static SodiumGameOptions options() {

@@ -27,6 +27,12 @@ public class MixinConfig {
     private MixinConfig() {
         // Defines the default rules which can be configured by the user or other mods.
         // You must manually add a rule for any new mixins not covered by an existing package rule.
+
+        // Telemetria ASMD (co-processador em C++). Sempre ligada: alimenta o motor
+        // de decisão de render, não é debug. Sem esta regra o SodiumMixinPlugin
+        // descarta os mixins do pacote silenciosamente.
+        this.addMixinRule("asmd", true);
+
         this.addMixinRule("core", true); // TODO: Don't actually allow the user to disable this
 
         this.addMixinRule("debug.checks", false);
