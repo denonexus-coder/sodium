@@ -287,6 +287,10 @@ public class GLRenderDevice implements RenderDevice {
             GlPrimitiveType primitiveType = GLRenderDevice.this.activeTessellation.getPrimitiveType();
 
             if (MGNativeDrawer.isSupported()) {
+                // Passamos os IDs reais do batch em vez de zeros fixos.
+                // Antes (0,0,0) fazia o native retornar imediatamente sem desenhar.
+                // Agora o native recebe os ponteiros e contagens reais e prossegue
+                // para drawRaw() → CognitiveBrain.decide() → PredictiveGovernor etc.
                 MGNativeDrawer.drawBatchZeroCopy(
                         0, 0, 0, indexType.getFormatId(),
                         batch.pElementCount,
