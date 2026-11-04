@@ -35,4 +35,18 @@ public abstract class GlAbstractTessellation implements GlTessellation {
             }
         }
     }
+
+    /**
+     * Retorna o buffer associado ao target OpenGL especificado, sem assumir
+     * posição fixa no array de bindings. Usado para extrair o VBO (ARRAY_BUFFER)
+     * e o EBO (ELEMENT_BUFFER) da tesselação ativa e passá-los ao caminho nativo.
+     */
+    public GlBuffer getBufferForTarget(GlBufferTarget target) {
+        for (TessellationBinding binding : this.bindings) {
+            if (binding.target() == target) {
+                return binding.buffer();
+            }
+        }
+        throw new IllegalArgumentException("No TessellationBinding for target " + target);
+    }
 }

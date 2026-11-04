@@ -287,12 +287,24 @@ public class GLRenderDevice implements RenderDevice {
             GlPrimitiveType primitiveType = GLRenderDevice.this.activeTessellation.getPrimitiveType();
 
             if (MGNativeDrawer.isSupported()) {
-                // Passamos os IDs reais do batch em vez de zeros fixos.
-                // Antes (0,0,0) fazia o native retornar imediatamente sem desenhar.
-                // Agora o native recebe os ponteiros e contagens reais e prossegue
-                // para drawRaw() → CognitiveBrain.decide() → PredictiveGovernor etc.
+                // Extrai os handles reais do VAO, VBO e EBO da tesselação ativa.
+                // batch.pElementCount / pElementPointer / pBaseVertex são ponteiros
+                // de dados do multi-draw, NÃO handles OpenGL — não os usamos como IDs.
+                GlVertexArrayTessellation tess = (GlVertexArrayTessellation) GLRenderDevice.this.activeTessellation;
+
+                // VAO: GlVertexArrayTessellation.array (private, exposto pelo getter)
+                int vao = tess.getArray().handle();
+
+                // VBO (ARRAY_BUFFER) e EBO (ELEMENT_BUFFER) — localizados pelo target,
+                // sem assumir posição fixa no array de bindings.
+                int vertexBuffer = tess.getBufferForTarget(GlBufferTarget.ARRAY_BUFFER).handle();
+                int indexBuffer  = tess.getBufferForTarget(GlBufferTarget.ELEMENT_BUFFER).handle();
+
                 MGNativeDrawer.drawBatchZeroCopy(
-                        0, 0, 0, indexType.getFormatId(),
+                        vao,
+                        vertexBuffer,
+                        indexBuffer,
+                        indexType.getFormatId(),
                         batch.pElementCount,
                         batch.pElementPointer,
                         batch.pBaseVertex,
