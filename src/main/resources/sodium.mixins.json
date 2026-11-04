@@ -15,6 +15,7 @@
     "asmd.PlayerTickMixin",
     "asmd.RenderLoopMixin",
     "asmd.SodiumChunkQueueMixin",
+    "asmd.ASMDOverlayMixin",
     "compat.sodiumextra.SliderControlExtendedMixin",
     "core.MinecraftClientMixin",
     "core.WindowMixin",
