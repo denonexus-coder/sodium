@@ -58,7 +58,7 @@ public final class ASMDOverlayRenderer {
     private static final int OFF_TECH_UBO_PCT = 184;
     private static final int OFF_GC_CHURN2 = 188;
 
-    private static final int MAX_LINES = 5;
+    private static final int MAX_LINES = 6;
     private static final int LINE_H = 9;
     private static final int PAD = 3;
 
@@ -116,6 +116,14 @@ public final class ASMDOverlayRenderer {
         float techMerged = buf.getFloat(OFF_TECH_MERGED_PCT);
         float techUbo = buf.getFloat(OFF_TECH_UBO_PCT);
 
+        // I/O e worldgen
+        float chunkGenMs = buf.getFloat(OFF_CHUNK_GEN_MS);
+        float resourceLoadMs = buf.getFloat(OFF_RESOURCE_LOAD_MS);
+        float meshMs = buf.getFloat(OFF_MESH_MS);
+        float chunkGapMs = buf.getFloat(OFF_CHUNK_GAP_MS);
+        int chunkPerSec = buf.getInt(OFF_CHUNK_PER_SEC);
+        float gpuSubmitMs = buf.getFloat(OFF_GPU_SUBMIT_MS);
+
         float fps = (float) (1000.0 / Math.max(frameMs, 1.0));
 
         // --- Linha 1: FPS + frame + draws + técnica ---
@@ -154,7 +162,17 @@ public final class ASMDOverlayRenderer {
           .append(" ").append(fmt(gcChurn, 1, DEC1)).append("MB/s");
         String l2 = SB.toString();
 
-        // --- Linha 4: chunks/ent/tile/speed/flags ---
+        // --- Linha 4: I/O + worldgen ---
+        SB.setLength(0);
+        SB.append("Gen:").append(fmt(chunkGenMs, 1, DEC1)).append("ms")
+          .append(" Mesh:").append(fmt(meshMs, 1, DEC1)).append("ms")
+          .append(" Res:").append(fmt(resourceLoadMs, 0, DEC1)).append("ms")
+          .append(" | ").append(chunkPerSec).append("ch/s")
+          .append(" gap:").append(fmt(chunkGapMs, 0, DEC1)).append("ms")
+          .append(" Gpu:").append(fmt(gpuSubmitMs, 1, DEC1)).append("ms");
+        String l3 = SB.toString();
+
+        // --- Linha 5: chunks/ent/tile/speed/flags ---
         SB.setLength(0);
         SB.append("CQ:").append(chunkQueue)
           .append(" E:").append(visibleEnts)
@@ -163,14 +181,14 @@ public final class ASMDOverlayRenderer {
           .append(" | ").append(standstill == 1 ? "SS" : "--")
           .append(sprinting == 1 ? " SP" : "")
           .append(" | View:").append(viewDist);
-        String l3 = SB.toString();
+        String l4 = SB.toString();
 
-        // --- Linha 5: pos/yaw ---
+        // --- Linha 6: pos/yaw ---
         SB.setLength(0);
         SB.append("Pos:").append(fmt(px, 0, DEC1))
           .append(",").append(fmt(pz, 0, DEC1))
           .append(" Yaw:").append(fmtInt((int) yaw, INT_TMP));
-        String l4 = SB.toString();
+        String l5 = SB.toString();
 
         TextRenderer font = client.textRenderer;
         int x = PAD;
@@ -182,6 +200,7 @@ public final class ASMDOverlayRenderer {
         w = Math.max(w, font.getWidth(l2));
         w = Math.max(w, font.getWidth(l3));
         w = Math.max(w, font.getWidth(l4));
+        w = Math.max(w, font.getWidth(l5));
         w += 8;
         int top = PAD;
         int bottom = PAD + (MAX_LINES * LINE_H) + 2;
@@ -195,9 +214,11 @@ public final class ASMDOverlayRenderer {
         y += LINE_H;
         context.drawTextWithShadow(font, l2, x + 2, y, 0xFFFF55);
         y += LINE_H;
-        context.drawTextWithShadow(font, l3, x + 2, y, 0x55AAFF);
+        context.drawTextWithShadow(font, l3, x + 2, y, 0xFFAA00);
         y += LINE_H;
-        context.drawTextWithShadow(font, l4, x + 2, y, 0xAAAAAA);
+        context.drawTextWithShadow(font, l4, x + 2, y, 0x55AAFF);
+        y += LINE_H;
+        context.drawTextWithShadow(font, l5, x + 2, y, 0xAAAAAA);
     }
 
     private static String techName(int t) {

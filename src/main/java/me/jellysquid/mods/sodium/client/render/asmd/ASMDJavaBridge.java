@@ -10,7 +10,7 @@ import org.lwjgl.system.MemoryUtil;
  * Zero allocation in the frame loop.
  */
 public final class ASMDJavaBridge {
-    private static final ByteBuffer BUFFER = ByteBuffer.allocateDirect(192).order(ByteOrder.nativeOrder());
+    private static final ByteBuffer BUFFER = ByteBuffer.allocateDirect(224).order(ByteOrder.nativeOrder());
 
     // Offset constants (see task spec)
     private static final int OFF_SERVER_TICK_TIME_MS = 0;
@@ -62,6 +62,15 @@ public final class ASMDJavaBridge {
     private static final int OFF_TECH_MERGED_PCT = 180; // f32: % frames MERGED
     private static final int OFF_TECH_UBO_PCT = 184;    // f32: % frames UBO
     private static final int OFF_GC_CHURN = 188;        // f32: GC churn MB/s (duplicado p/ acesso rápido)
+    // 192..223 (32 bytes) — métricas de I/O e worldgen
+    private static final int OFF_CHUNK_GEN_MS = 192;    // f32: último tempo de geração de chunk (ms)
+    private static final int OFF_RESOURCE_LOAD_MS = 196;// f32: último reload de recursos (ms)
+    private static final int OFF_CHUNK_DISK_MS = 200;   // f32: último load de chunk do disco (ms)
+    private static final int OFF_MESH_MS = 204;         // f32: último tempo de montagem de malha (ms)
+    private static final int OFF_CHUNK_GAP_MS = 208;    // f32: gap entre entrega de chunks (ms)
+    private static final int OFF_CHUNK_PER_SEC = 212;   // i32: chunks entregues por segundo
+    private static final int OFF_GPU_SUBMIT_MS = 216;   // f32: GPU submit wall-clock (ms) do SuperDrawer
+    private static final int OFF_RESERVED2 = 220;       // f32: reservado
 
     private ASMDJavaBridge() {
     }
@@ -199,6 +208,32 @@ public final class ASMDJavaBridge {
         BUFFER.putFloat(OFF_TECH_UNROLL_PCT, unrollPct);
         BUFFER.putFloat(OFF_TECH_MERGED_PCT, mergedPct);
         BUFFER.putFloat(OFF_TECH_UBO_PCT, uboPct);
+    }
+
+    // ---- I/O e worldgen (escrito pelos mixins) ----
+    public static void setChunkGenMs(float ms) {
+        BUFFER.putFloat(OFF_CHUNK_GEN_MS, ms);
+    }
+
+    public static void setResourceLoadMs(float ms) {
+        BUFFER.putFloat(OFF_RESOURCE_LOAD_MS, ms);
+    }
+
+    public static void setChunkDiskMs(float ms) {
+        BUFFER.putFloat(OFF_CHUNK_DISK_MS, ms);
+    }
+
+    public static void setMeshMs(float ms) {
+        BUFFER.putFloat(OFF_MESH_MS, ms);
+    }
+
+    public static void setChunkDelivery(int perSec, float gapMs) {
+        BUFFER.putInt(OFF_CHUNK_PER_SEC, perSec);
+        BUFFER.putFloat(OFF_CHUNK_GAP_MS, gapMs);
+    }
+
+    public static void setGpuSubmitMs(float ms) {
+        BUFFER.putFloat(OFF_GPU_SUBMIT_MS, ms);
     }
 
     // ---- Contagem de block entities do frame ----

@@ -11,9 +11,11 @@
   },
   "client": [
     "asmd.BlockEntityCountMixin",
+    "asmd.ChunkGenMixin",
     "asmd.EntityRendererMixin",
     "asmd.PlayerTickMixin",
     "asmd.RenderLoopMixin",
+    "asmd.ResourceLoadMixin",
     "asmd.SodiumChunkQueueMixin",
     "asmd.ASMDOverlayMixin",
     "compat.sodiumextra.SliderControlExtendedMixin",

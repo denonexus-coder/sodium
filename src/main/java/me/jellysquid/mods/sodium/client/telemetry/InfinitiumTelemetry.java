@@ -102,6 +102,8 @@ public final class InfinitiumTelemetry {
 
     /** ServerTickMixin: fim - inicio de MinecraftServer.tick = MSPT real. */
     public static void recordServerTickMs(double ms) {
+        // Sempre escreve no buffer ASMD (custo: um putFloat)
+        me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge.setServerTickTimeMs((float) ms);
         if (!enabled) {
             return;
         }
@@ -111,22 +113,29 @@ public final class InfinitiumTelemetry {
 
     /** ChunkDeliveryMixin: um chunk entrou no pipeline do render. */
     public static void recordChunkDelivered() {
-        if (!enabled) {
-            return;
-        }
         long now = System.nanoTime();
         long prev = lastChunkNanos;
         lastChunkNanos = now;
 
+        double gap = -1.0;
         if (prev != 0L) {
-            double gap = (now - prev) / 1.0e6;
-            // Gap gigante = parada, nao cadencia: nao polui a media.
-            if (gap < 10_000.0) {
-                gapMs = ewma(gapMs, gap, ALPHA);
-            }
+            gap = (now - prev) / 1.0e6;
         }
+
+        // Sempre escreve no buffer ASMD
+        int count;
         synchronized (countLock) {
             chunkWindow++;
+            count = chunkWindow;
+        }
+        me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge.setChunkDelivery(
+            count, gap >= 0.0 ? (float) gap : 0.0f);
+
+        if (!enabled) {
+            return;
+        }
+        if (prev != 0L && gap >= 0.0 && gap < 10_000.0) {
+            gapMs = ewma(gapMs, gap, ALPHA);
         }
     }
 
@@ -135,6 +144,8 @@ public final class InfinitiumTelemetry {
      * Sodium. Cancelamentos (retorno null) nao chegam aqui de proposito.
      */
     public static void recordMeshMs(double ms) {
+        // Sempre escreve no buffer ASMD
+        me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge.setMeshMs((float) ms);
         if (!enabled) {
             return;
         }
@@ -196,6 +207,8 @@ public final class InfinitiumTelemetry {
         float ms = FrameGenBridge.gpuDrawerTimeMs();
         if (ms >= 0.0f) {
             gpuMs = ewma(gpuMs, ms, ALPHA);
+            // Sincroniza com buffer ASMD (custo: um putFloat)
+            me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge.setGpuSubmitMs(ms);
         }
         if (gpuMode < 0) {
             gpuMode = FrameGenBridge.gpuTimerMode();
