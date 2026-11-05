@@ -1,50 +1,76 @@
 package me.jellysquid.mods.sodium.mixin.asmd;
 
 import me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge;
-import net.minecraft.world.gen.chunk.ChunkGenerator;
-import net.minecraft.world.gen.chunk.NoiseConfig;
-import net.minecraft.world.gen.chunk.StructureAccessor;
-import net.minecraft.world.gen.Blender;
 import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.gen.StructureAccessor;
+import net.minecraft.world.gen.chunk.Blender;
+import net.minecraft.world.gen.chunk.NoiseChunkGenerator;
+import net.minecraft.world.gen.noise.NoiseConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.concurrent.CompletionStage;
-
 /**
- * ASMD — tempo de geração de chunk (worldgen).
+ * ASMD — tempo de geração de terreno (worldgen).
  *
- * Hook em ChunkGenerator.populateNoise (Yarn 1.20.1): o ponto onde o terreno
- * é gerado a partir de noise. Mede o tempo de CPU da geração.
+ * Alvo verificado no yarn-1.20.1+build.10 (mappings locais):
+ *   NoiseChunkGenerator.populateNoise
+ *   (Lnet/minecraft/world/gen/chunk/Blender;Lnet/minecraft/world/gen/StructureAccessor;
+ *    Lnet/minecraft/world/gen/noise/NoiseConfig;Lnet/minecraft/world/chunk/Chunk;II)
+ *    Lnet/minecraft/world/chunk/Chunk;
  *
- * Ultra-leitor NÃO toca neste método (só RegionFileStorage/RegionFile),
- * então não há conflito de @Overwrite.
+ * Esta e a versao SINCRONA que preenche o chunk com ruido — o trabalho real de
+ * geracao de terreno (Mojang: NoiseBasedChunkGenerator.doFill, ~90 linhas de
+ * loop). O populateNoise da classe base ChunkGenerator e abstrato, por isso o
+ * mixin alvo na subclasse concreta.
  *
- * Custo: 2 System.nanoTime() por chunk gerado (~0.05% do tempo total).
+ * Nao conflita com o Ultra-leitor: ele sobrescreve apenas RegionFileStorage e
+ * RegionFile (leitura/escrita em disco), nunca worldgen.
+ *
+ * Roda nas threads de worldgen (vem varias em paralelo), por isso o inicio e
+ * guardado em ThreadLocal — um field comum causaria medições cruzadas.
+ *
+ * Custo: 2 System.nanoTime() por chunk gerado; escrita de 1 float no buffer.
  */
-@Mixin(ChunkGenerator.class)
+@Mixin(NoiseChunkGenerator.class)
 public abstract class ChunkGenMixin {
+
+    /** Inicio da geracao atual, por thread (worldgen usa pool de threads). */
     @Unique
-    private long asmd$genStartNs;
+    private ThreadLocal<Long> asmd$genStartNs;
 
     @Inject(method = "populateNoise", at = @At("HEAD"))
-    private void asmd$genStart(Blender blender, NoiseConfig noiseConfig,
-                               Chunk chunk, StructureAccessor structureAccessor,
-                               CallbackInfoReturnable<CompletionStage<Chunk>> cir) {
-        this.asmd$genStartNs = System.nanoTime();
+    private void asmd$genStart(Blender blender, StructureAccessor structureAccessor,
+                               NoiseConfig noiseConfig, Chunk chunk, int x, int z,
+                               CallbackInfoReturnable<Chunk> cir) {
+        ThreadLocal<Long> tl = this.asmd$genStartNs;
+        if (tl == null) {
+            tl = new ThreadLocal<>();
+            this.asmd$genStartNs = tl;
+        }
+        tl.set(System.nanoTime());
     }
 
     @Inject(method = "populateNoise", at = @At("RETURN"))
-    private void asmd$genEnd(Blender blender, NoiseConfig noiseConfig,
-                             Chunk chunk, StructureAccessor structureAccessor,
-                             CallbackInfoReturnable<CompletionStage<Chunk>> cir) {
-        long elapsed = System.nanoTime() - this.asmd$genStartNs;
-        if (this.asmd$genStartNs > 0 && elapsed < 10_000_000_000L) { // < 10s = válido
-            float ms = elapsed / 1_000_000.0f;
-            ASMDJavaBridge.setChunkGenMs(ms);
+    private void asmd$genEnd(Blender blender, StructureAccessor structureAccessor,
+                             NoiseConfig noiseConfig, Chunk chunk, int x, int z,
+                             CallbackInfoReturnable<Chunk> cir) {
+        ThreadLocal<Long> tl = this.asmd$genStartNs;
+        if (tl == null) {
+            return;
+        }
+        Long start = tl.get();
+        if (start == null) {
+            return;
+        }
+        tl.remove();
+
+        long elapsed = System.nanoTime() - start;
+        // Filtro: < 10 s e geracao plausivel; valores gigantes = relogio/estado estranho.
+        if (elapsed < 10_000_000_000L) {
+            ASMDJavaBridge.setChunkGenMs(elapsed / 1_000_000.0f);
         }
     }
 }

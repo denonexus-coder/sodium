@@ -101,6 +101,9 @@
     "features.textures.mipmaps.SpriteContentsMixin",
     "features.world.biome.BiomeMixin",
     "workarounds.context_creation.WindowMixin",
-    "workarounds.event_loop.RenderSystemMixin"
+    "workarounds.event_loop.RenderSystemMixin",
+    "memory.ChunkLoadMixin",
+    "memory.BufferBuilderAllocMixin",
+    "memory.RenderLoopHeartbeatMixin"
   ]
 }

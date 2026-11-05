@@ -57,6 +57,14 @@ public final class ASMDOverlayRenderer {
     private static final int OFF_TECH_MERGED_PCT = 180;
     private static final int OFF_TECH_UBO_PCT = 184;
     private static final int OFF_GC_CHURN2 = 188;
+    // I/O e worldgen
+    private static final int OFF_CHUNK_GEN_MS = 192;
+    private static final int OFF_RESOURCE_LOAD_MS = 196;
+    private static final int OFF_CHUNK_DISK_MS = 200;
+    private static final int OFF_MESH_MS = 204;
+    private static final int OFF_CHUNK_GAP_MS = 208;
+    private static final int OFF_CHUNK_PER_SEC = 212;
+    private static final int OFF_GPU_SUBMIT_MS = 216;
 
     private static final int MAX_LINES = 6;
     private static final int LINE_H = 9;

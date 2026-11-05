@@ -9,6 +9,7 @@ import me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge;
 import me.jellysquid.mods.sodium.client.render.asmd.ASMDNativeBridge;
 import me.jellysquid.mods.sodium.client.render.asmd.GCMonitorThread;
 import me.jellysquid.mods.sodium.client.util.FlawlessFrames;
+import me.jellysquid.mods.sodium.memory.AIMemoryEngineV3;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
@@ -38,6 +39,9 @@ public class SodiumClientMod implements ClientModInitializer {
         CONFIG = loadConfig();
 
         FlawlessFrames.onClientInitialization();
+
+        // Inicializa o AI Memory Engine V3 (monitor de heap, pool de objetos, cache TTL)
+        AIMemoryEngineV3.start();
 
         initAsmdTelemetry();
 

@@ -2,57 +2,63 @@ package me.jellysquid.mods.sodium.mixin.asmd;
 
 import me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge;
 import net.minecraft.resource.ReloadableResourceManagerImpl;
-import net.minecraft.resource.ResourcePack;
+import net.minecraft.resource.ResourceReload;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.BooleanSupplier;
 
 /**
- * ASMD — tempo de carregamento de recursos (textures, models, sounds).
+ * ASMD — tempo de carregamento de recursos (texturas, models, sons, packs).
  *
- * Hook em ReloadableResourceManagerImpl.reload (Yarn 1.20.1): o ponto onde
- * todos os resource packs são recarregados. Mede o tempo total do reload.
+ * Alvo verificado no yarn-1.20.1+build.10 (mappings locais):
+ *   ReloadableResourceManagerImpl.reload
+ *   (Ljava/util/concurrent/Executor;Ljava/util/concurrent/Executor;
+ *    Ljava/util/concurrent/CompletableFuture;Ljava/util/List;)
+ *    Lnet/minecraft/resource/ResourceReload;
+ *   params: prepareExecutor, applyExecutor, initialStage, packs
  *
- * Ultra-leitor NÃO toca neste método (só RegionFileStorage/RegionFile),
- * então não há conflito.
+ * Chamado no boot do jogo, na troca de resource pack e no F3+T. O metodo roda
+ * na thread chamadora (retorna um ResourceReload futuro), entao HEAD e RETURN
+ * estao na mesma thread — um field comum basta.
  *
- * Chamado: boot do jogo, troca de resource pack, F3+T.
- * Custo: 2 System.nanoTime() por reload (~0 no frame quente).
+ * O Ultra-leitor nao toca em ResourceManager, entao nao ha conflito. O Sodium
+ * tambem nao injeta neste metodo.
+ *
+ * Custo: 2 System.nanoTime() por reload (zero no frame quente).
  */
 @Mixin(ReloadableResourceManagerImpl.class)
 public abstract class ResourceLoadMixin {
+
     @Unique
     private long asmd$reloadStartNs;
 
-    @Inject(
-        method = "reload(Ljava/util/concurrent/Executor;Ljava/util/concurrent/Executor;Ljava/lang/Iterable;Ljava/util/concurrent/CompletableFuture;)Ljava/util/concurrent/CompletableFuture;",
-        at = @At("HEAD")
-    )
+    @Inject(method = "reload", at = @At("HEAD"))
     private void asmd$reloadStart(Executor prepareExecutor, Executor applyExecutor,
-                                  Iterable<ResourcePack> packs,
-                                  CompletableFuture<Void> initialFuture,
-                                  CallbackInfoReturnable<CompletableFuture<Void>> cir) {
+                                  CompletableFuture<?> initialStage, List<?> packs,
+                                  CallbackInfoReturnable<ResourceReload> cir) {
         this.asmd$reloadStartNs = System.nanoTime();
     }
 
-    @Inject(
-        method = "reload(Ljava/util/concurrent/Executor;Ljava/util/concurrent/Executor;Ljava/lang/Iterable;Ljava/util/concurrent/CompletableFuture;)Ljava/util/concurrent/CompletableFuture;",
-        at = @At("RETURN")
-    )
+    @Inject(method = "reload", at = @At("RETURN"))
     private void asmd$reloadEnd(Executor prepareExecutor, Executor applyExecutor,
-                                Iterable<ResourcePack> packs,
-                                CompletableFuture<Void> initialFuture,
-                                CallbackInfoReturnable<CompletableFuture<Void>> cir) {
-        long elapsed = System.nanoTime() - this.asmd$reloadStartNs;
-        if (this.asmd$reloadStartNs > 0 && elapsed < 120_000_000_000L) { // < 120s = válido
-            float ms = elapsed / 1_000_000.0f;
-            ASMDJavaBridge.setResourceLoadMs(ms);
+                                CompletableFuture<?> initialStage, List<?> packs,
+                                CallbackInfoReturnable<ResourceReload> cir) {
+        long start = this.asmd$reloadStartNs;
+        if (start == 0L) {
+            return;
+        }
+        this.asmd$reloadStartNs = 0L;
+
+        long elapsed = System.nanoTime() - start;
+        // Filtro: < 120 s e reload plausivel (packs grandes demoram, mas nao minutos a mais).
+        if (elapsed < 120_000_000_000L) {
+            ASMDJavaBridge.setResourceLoadMs(elapsed / 1_000_000.0f);
         }
     }
 }
