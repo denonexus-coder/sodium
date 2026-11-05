@@ -38,7 +38,13 @@ public final class ASMDJavaBridge {
     private static final int OFF_STANDSTILL = 92;
     private static final int OFF_SPRINTING = 96;
     private static final int OFF_DRS_SCALE = 100;
-    // Padding 104..127 (24 bytes) reserved.
+    // Padding 104..127 (24 bytes) — engine state exposto pelo C++
+    private static final int OFF_TECHNIQUE = 104;    // i32: 1=UNROLL 2=MERGED 3=UBO 4=PANIC
+    private static final int OFF_DYNAMIC_K = 108;    // i32: crossover dinâmico (4-60)
+    private static final int OFF_TREND = 112;        // i32: -1=subindo 0=estável +1=descendo
+    private static final int OFF_SGD = 116;          // f32: acumulador SGD
+    private static final int OFF_DRAW_COUNT = 120;   // i32: sub-draws do frame anterior
+    private static final int OFF_FRAME_MS = 124;     // f32: duração real do frame anterior (ms)
 
     private ASMDJavaBridge() {
     }

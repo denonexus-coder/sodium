@@ -1,25 +1,31 @@
 package me.jellysquid.mods.sodium.mixin.asmd;
 
 import me.jellysquid.mods.sodium.client.render.asmd.ASMDOverlayRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.hud.InGameHud;
+import net.minecraft.client.Keyboard;
+import net.minecraft.client.MinecraftClient;
+import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * ASMD Overlay — hook no RETURN de InGameHud.render.
+ * ASMD Overlay Toggle — F8 liga/desliga o overlay do motor adaptativo.
  *
- * Nesse ponto o mundo e a HUD ja estao no buffer: desenhar aqui deixa as
- * linhas por cima do mundo, na fase 2D (mesmo instante do F3), com o
- * DrawContext/estado GL corretos — sem tocar em GL manualmente e sem
- * interferir no render do mundo. Custo quando desligado: um teste.
+ * Custo quando F8 não é pressionado: um teste de tecla por evento
+ * (não por frame — GLFW só entrega eventos quando há input).
  */
-@Mixin(InGameHud.class)
+@Mixin(Keyboard.class)
 public abstract class ASMDOverlayMixin {
-    @Inject(method = "render(Lnet/minecraft/client/gui/DrawContext;F)V", at = @At("RETURN"))
-    private void asmd$drawOverlay(DrawContext context, float tickDelta, CallbackInfo ci) {
-        ASMDOverlayRenderer.render(context, tickDelta, net.minecraft.client.MinecraftClient.getInstance());
+    @Inject(method = "onKey", at = @At("HEAD"))
+    private void asmd$onKey(long window, int key, int scancode, int action, int modifiers, CallbackInfo ci) {
+        // Só no jogo (tela nula), apenas no pressionar (não repetir)
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.currentScreen != null) return;
+        if (action != GLFW.GLFW_PRESS) return;
+
+        if (key == GLFW.GLFW_KEY_F8) {
+            ASMDOverlayRenderer.toggle();
+        }
     }
 }
