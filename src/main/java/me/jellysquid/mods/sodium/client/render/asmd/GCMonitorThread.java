@@ -18,6 +18,11 @@ import java.lang.management.MemoryUsage;
  *
  * The render/frame loop never touches this thread's state: it only reads the
  * two buffer fields already written here, so the hot path stays allocation-free.
+ *
+ * <p>This thread is also the <b>single GC poller</b> for the whole mod: it
+ * publishes the cumulative collection counters as plain static volatiles so
+ * {@code AIMemoryEngineV3} can read them instead of doing its own
+ * {@code GarbageCollectorMXBean} round. One MXBean poll instead of two.
  */
 public final class GCMonitorThread extends Thread {
     private static final long SAMPLE_INTERVAL_MS = 250L;
@@ -26,6 +31,10 @@ public final class GCMonitorThread extends Thread {
     private static final float FAST_GROWTH_MB_S = 8.0f;
 
     private static volatile boolean running = true;
+
+    // Latest cumulative GC counters, written only by the monitor thread.
+    private static volatile long lastGcCount   = 0L;
+    private static volatile long lastGcTimeMs  = 0L;
 
     private GCMonitorThread() {
         super("ASMD-GC-Monitor");
@@ -42,6 +51,12 @@ public final class GCMonitorThread extends Thread {
     public static void stopMonitor() {
         running = false;
     }
+
+    /** Cumulative GC collections since JVM start, as of the last 250ms sample. */
+    public static long gcCollections() { return lastGcCount; }
+
+    /** Cumulative GC pause time in ms since JVM start, as of the last 250ms sample. */
+    public static long gcTimeMs() { return lastGcTimeMs; }
 
     @Override
     public void run() {
@@ -148,6 +163,8 @@ public final class GCMonitorThread extends Thread {
             prevGcCount = gcCount;
             prevGcTime = gcTime;
             prevSampleNs = nowNs;
+            lastGcCount = gcCount;
+            lastGcTimeMs = gcTime;
 
             // Defensive no-op: keeps nowMs referenced without allocation.
             if (nowMs < 0) {

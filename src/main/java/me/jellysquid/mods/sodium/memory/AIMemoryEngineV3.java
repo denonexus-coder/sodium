@@ -6,12 +6,12 @@
  */
 package me.jellysquid.mods.sodium.memory;
 
-import java.lang.management.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
+import me.jellysquid.mods.sodium.client.render.asmd.GCMonitorThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,17 +63,12 @@ public final class AIMemoryEngineV3 {
 
     private static final DoubleAdder MAX_PRESSURE = new DoubleAdder();
 
-    private static final LongAdder GC_COLLECTIONS = new LongAdder();
-    private static final LongAdder GC_TIME_MS     = new LongAdder();
     private static final AtomicLong GC_PAUSE_MAX_NS = new AtomicLong(0L);
 
     private static final AtomicLong HEARTBEAT_MAX_DELAY_NS = new AtomicLong(0L);
 
     private static final AtomicInteger CYCLE_COUNT = new AtomicInteger(0);
     private static final AtomicLong CYCLE_START_NS = new AtomicLong(System.nanoTime());
-
-    private static final List<GarbageCollectorMXBean> GC_BEANS =
-        Collections.unmodifiableList(ManagementFactory.getGarbageCollectorMXBeans());
 
     private static final Map<Long, CacheEntry> DATA_CACHE =
         new LinkedHashMap<Long, CacheEntry>(16, 0.75f, true) {
@@ -416,13 +411,8 @@ public final class AIMemoryEngineV3 {
             case NORMAL -> { /* sem ação agressiva */ }
         }
 
-        long col = 0, time = 0;
-        for (GarbageCollectorMXBean b : GC_BEANS) {
-            col += b.getCollectionCount();
-            time += b.getCollectionTime();
-        }
-        GC_COLLECTIONS.add(col);
-        GC_TIME_MS.add(time);
+        // GC: sem poll próprio — lê o snapshot que o GCMonitorThread já
+        // coleta a cada 250ms (fonte única de GC de todo o mod).
     }
 
     public static void runMonitorIteration() {
@@ -435,8 +425,8 @@ public final class AIMemoryEngineV3 {
     /* =====================================================================
      *  ESTATÍSTICAS GC (leitura apenas — nunca altera parâmetros automaticamente)
      * ===================================================================== */
-    public static long gcCollections() { return GC_COLLECTIONS.sum(); }
-    public static long gcTimeMs()      { return GC_TIME_MS.sum(); }
+    public static long gcCollections() { return GCMonitorThread.gcCollections(); }
+    public static long gcTimeMs()      { return GCMonitorThread.gcTimeMs(); }
     public static long gcPauseMaxMs()  { return GC_PAUSE_MAX_NS.get() / 1_000_000L; }
 
     public static void sampleGCPause(long pauseNs) {
@@ -518,8 +508,8 @@ public final class AIMemoryEngineV3 {
         LOGGER.info("[7] Pool hits:        {}  | misses: {}", TOTAL_POOL_HITS.sum(), TOTAL_POOL_MISSES.sum());
         LOGGER.info("[8] Cache entradas:   {}  | removidas: {} | TTL: {}", cacheSize(), CACHE_REMOVED.sum(), CACHE_EVICTED_TTL.sum());
         LOGGER.info("[9] Temp refs liber.: {}", TEMP_REFS_RELEASED.sum());
-        LOGGER.info("[10] Ciclos GC:       {}", GC_COLLECTIONS.sum());
-        LOGGER.info("[11] Tempo GC:        {} ms", GC_TIME_MS.sum());
+        LOGGER.info("[10] Ciclos GC:       {}", gcCollections());
+        LOGGER.info("[11] Tempo GC:        {} ms", gcTimeMs());
         LOGGER.info("[12] Pausa GC máx:    {} ms", GC_PAUSE_MAX_NS.get() / 1_000_000L);
         LOGGER.info("[13] Heartbeat máx:   {} ms", HEARTBEAT_MAX_DELAY_NS.get() / 1_000_000.0);
         LOGGER.info("[14] Tempo execução:  {}", formatDuration(CYCLE_START_NS.get(), System.nanoTime()));
