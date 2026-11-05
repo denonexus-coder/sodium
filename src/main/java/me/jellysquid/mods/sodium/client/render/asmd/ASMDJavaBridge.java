@@ -10,7 +10,7 @@ import org.lwjgl.system.MemoryUtil;
  * Zero allocation in the frame loop.
  */
 public final class ASMDJavaBridge {
-    private static final ByteBuffer BUFFER = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder());
+    private static final ByteBuffer BUFFER = ByteBuffer.allocateDirect(192).order(ByteOrder.nativeOrder());
 
     // Offset constants (see task spec)
     private static final int OFF_SERVER_TICK_TIME_MS = 0;
@@ -45,6 +45,23 @@ public final class ASMDJavaBridge {
     private static final int OFF_SGD = 116;          // f32: acumulador SGD
     private static final int OFF_DRAW_COUNT = 120;   // i32: sub-draws do frame anterior
     private static final int OFF_FRAME_MS = 124;     // f32: duração real do frame anterior (ms)
+    // 128..191 (64 bytes) — métricas expostas pelo C++
+    private static final int OFF_FPS_MIN = 128;      // f32: FPS mínimo (120 frames)
+    private static final int OFF_FPS_MED = 132;      // f32: FPS mediano
+    private static final int OFF_FPS_MAX = 136;      // f32: FPS máximo
+    private static final int OFF_MS_MIN = 140;       // f32: frame ms mínimo
+    private static final int OFF_MS_MED = 144;       // f32: frame ms mediano
+    private static final int OFF_MS_MAX = 148;       // f32: frame ms máximo
+    private static final int OFF_DRAWS_MIN = 152;    // i32: draws mínimo
+    private static final int OFF_DRAWS_MED = 156;    // i32: draws mediano
+    private static final int OFF_DRAWS_MAX = 160;    // i32: draws máximo
+    private static final int OFF_GPU_MS = 164;       // f32: tempo GPU do último draw (ms)
+    private static final int OFF_CPU_DRAW_MS = 168;  // f32: tempo CPU do último draw (ms)
+    private static final int OFF_MERGE_RATIO = 172;  // f32: % de draws fundidos (0-1)
+    private static final int OFF_TECH_UNROLL_PCT = 176; // f32: % frames UNROLL (0-100)
+    private static final int OFF_TECH_MERGED_PCT = 180; // f32: % frames MERGED
+    private static final int OFF_TECH_UBO_PCT = 184;    // f32: % frames UBO
+    private static final int OFF_GC_CHURN = 188;        // f32: GC churn MB/s (duplicado p/ acesso rápido)
 
     private ASMDJavaBridge() {
     }
@@ -141,6 +158,47 @@ public final class ASMDJavaBridge {
 
     public static void setDrsViewportScale(float scale) {
         BUFFER.putFloat(OFF_DRS_SCALE, scale);
+    }
+
+    // ---- Engine state (escrito pelo C++, lido pelo overlay) ----
+    public static void setEngineState(int technique, int dynamicK, int trend,
+                                      float sgd, int drawCount, float frameMs) {
+        BUFFER.putInt(OFF_TECHNIQUE, technique);
+        BUFFER.putInt(OFF_DYNAMIC_K, dynamicK);
+        BUFFER.putInt(OFF_TREND, trend);
+        BUFFER.putFloat(OFF_SGD, sgd);
+        BUFFER.putInt(OFF_DRAW_COUNT, drawCount);
+        BUFFER.putFloat(OFF_FRAME_MS, frameMs);
+    }
+
+    public static void setFpsStats(float min, float med, float max) {
+        BUFFER.putFloat(OFF_FPS_MIN, min);
+        BUFFER.putFloat(OFF_FPS_MED, med);
+        BUFFER.putFloat(OFF_FPS_MAX, max);
+    }
+
+    public static void setMsStats(float min, float med, float max) {
+        BUFFER.putFloat(OFF_MS_MIN, min);
+        BUFFER.putFloat(OFF_MS_MED, med);
+        BUFFER.putFloat(OFF_MS_MAX, max);
+    }
+
+    public static void setDrawStats(int min, int med, int max) {
+        BUFFER.putInt(OFF_DRAWS_MIN, min);
+        BUFFER.putInt(OFF_DRAWS_MED, med);
+        BUFFER.putInt(OFF_DRAWS_MAX, max);
+    }
+
+    public static void setDrawTiming(float gpuMs, float cpuMs, float mergeRatio) {
+        BUFFER.putFloat(OFF_GPU_MS, gpuMs);
+        BUFFER.putFloat(OFF_CPU_DRAW_MS, cpuMs);
+        BUFFER.putFloat(OFF_MERGE_RATIO, mergeRatio);
+    }
+
+    public static void setTechniqueDistribution(float unrollPct, float mergedPct, float uboPct) {
+        BUFFER.putFloat(OFF_TECH_UNROLL_PCT, unrollPct);
+        BUFFER.putFloat(OFF_TECH_MERGED_PCT, mergedPct);
+        BUFFER.putFloat(OFF_TECH_UBO_PCT, uboPct);
     }
 
     // ---- Contagem de block entities do frame ----
