@@ -41,7 +41,17 @@ public abstract class ChunkGenMixin {
     @Unique
     private ThreadLocal<Long> asmd$genStartNs;
 
-    @Inject(method = "populateNoise", at = @At("HEAD"))
+    // Descritor COMPLETO obrigatorio: "populateNoise" existe tambem na superclasse
+    // ChunkGenerator (versao async -> CompletableFuture, method_12088). Um selector
+    // so-de-nome e resolvido pela hierarquia pelo remapper do Loom, que escolhia a
+    // sobrecarga errada e dava "Invalid descriptor ... Expected ... mas found ...".
+    private static final String GEN_METHOD =
+            "populateNoise(Lnet/minecraft/world/gen/chunk/Blender;" +
+            "Lnet/minecraft/world/gen/StructureAccessor;" +
+            "Lnet/minecraft/world/gen/noise/NoiseConfig;" +
+            "Lnet/minecraft/world/chunk/Chunk;II)Lnet/minecraft/world/chunk/Chunk;";
+
+    @Inject(method = GEN_METHOD, at = @At("HEAD"))
     private void asmd$genStart(Blender blender, StructureAccessor structureAccessor,
                                NoiseConfig noiseConfig, Chunk chunk, int x, int z,
                                CallbackInfoReturnable<Chunk> cir) {
@@ -53,7 +63,7 @@ public abstract class ChunkGenMixin {
         tl.set(System.nanoTime());
     }
 
-    @Inject(method = "populateNoise", at = @At("RETURN"))
+    @Inject(method = GEN_METHOD, at = @At("RETURN"))
     private void asmd$genEnd(Blender blender, StructureAccessor structureAccessor,
                              NoiseConfig noiseConfig, Chunk chunk, int x, int z,
                              CallbackInfoReturnable<Chunk> cir) {

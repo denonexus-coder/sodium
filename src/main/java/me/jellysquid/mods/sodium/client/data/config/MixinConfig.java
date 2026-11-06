@@ -33,6 +33,11 @@ public class MixinConfig {
         // descarta os mixins do pacote silenciosamente.
         this.addMixinRule("asmd", true);
 
+        // Memoria do cliente (pool do BufferBuilder, carga de chunk, heartbeat do
+        // loop de render). Sem esta regra o SodiumMixinPlugin nao encontra regra
+        // para os mixins "memory.*" e os desativa como "foreign".
+        this.addMixinRule("memory", true);
+
         this.addMixinRule("core", true); // TODO: Don't actually allow the user to disable this
 
         this.addMixinRule("debug.checks", false);
