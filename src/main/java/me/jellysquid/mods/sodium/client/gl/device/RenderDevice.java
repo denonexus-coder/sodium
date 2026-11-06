@@ -24,4 +24,6 @@ public interface RenderDevice {
     DeviceFunctions getDeviceFunctions();
 
     int getSubTexelPrecisionBits();
+
+    void setCurrentRenderLayer(int ordinal);
 }

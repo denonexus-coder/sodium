@@ -18,6 +18,8 @@ import org.lwjgl.opengl.*;
 import java.nio.ByteBuffer;
 
 public class GLRenderDevice implements RenderDevice {
+    public static final GLRenderDevice INSTANCE = new GLRenderDevice();
+
     private final GlStateTracker stateTracker = new GlStateTracker();
     private final CommandList commandList = new ImmediateCommandList(this.stateTracker);
     private final DrawCommandList drawCommandList = new ImmediateDrawCommandList();

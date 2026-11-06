@@ -217,6 +217,9 @@ public class RenderSectionManager {
 
     public void renderLayer(ChunkRenderMatrices matrices, TerrainRenderPass pass, double x, double y, double z) {
         RenderDevice device = RenderDevice.INSTANCE;
+        // Informe o MobileGlues sobre o tipo de chunk (RenderLayer) para seleção adaptativa de desenho
+        device.setCurrentRenderLayer(pass.getLayer().ordinal());
+
         CommandList commandList = device.createCommandList();
 
         this.chunkRenderer.render(matrices, commandList, this.renderLists, pass, new CameraTransform(x, y, z));

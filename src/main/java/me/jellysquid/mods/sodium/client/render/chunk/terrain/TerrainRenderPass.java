@@ -30,6 +30,10 @@ public class TerrainRenderPass {
         this.layer.endDrawing();
     }
 
+    public RenderLayer getLayer() {
+        return this.layer;
+    }
+
     public boolean supportsFragmentDiscard() {
         return this.fragmentDiscard;
     }
