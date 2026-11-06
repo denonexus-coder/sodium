@@ -1,5 +1,7 @@
 package me.jellysquid.mods.sodium.client.render.chunk;
 
+import net.minecraft.client.render.RenderLayer;
+
 /**
  * Tipos de chunk para seleção adaptativa de método de desenho.
  * Cada tipo tem características de GPU diferentes:
@@ -41,5 +43,31 @@ public enum ChunkType {
             case 3: return TRANSLUCENT;
             default: return CUSTOM;
         }
+    }
+
+    /**
+     * Converte uma instância de {@link RenderLayer} — que é abstract class no
+     * Yarn 1.20.1 (class_1921) e <b>não</b> tem {@code ordinal()} — para o
+     * ordinal esperado por {@link #fromRenderLayer(int)}.
+     *
+     * <p>Compara identidade contra os singletons estáticos do RenderLayer.
+     */
+    public static int ordinalOf(RenderLayer layer) {
+        if (layer == null) {
+            return 0;
+        }
+        if (layer == RenderLayer.getSolid()) {
+            return 0;
+        }
+        if (layer == RenderLayer.getCutout()) {
+            return 1;
+        }
+        if (layer == RenderLayer.getCutoutMipped()) {
+            return 2;
+        }
+        if (layer == RenderLayer.getTranslucent()) {
+            return 3;
+        }
+        return 0;
     }
 }

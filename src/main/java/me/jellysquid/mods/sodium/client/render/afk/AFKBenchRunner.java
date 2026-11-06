@@ -138,7 +138,8 @@ public final class AFKBenchRunner {
                 0, 0, 0, 0x1403, // vao, vbo, ebo, GL_UNSIGNED_INT
                 0L, 0L, 0L, // ponteiros simulados (não usados no modo bench)
                 drawCount,
-                0.0f, false, 0.0f
+                0.0f, false, 0.0f,
+                type.id
             );
         }
 
@@ -150,7 +151,8 @@ public final class AFKBenchRunner {
                 0, 0, 0, 0x1403,
                 0L, 0L, 0L,
                 drawCount,
-                0.0f, false, 0.0f
+                0.0f, false, 0.0f,
+                type.id
             );
 
             long endNs = System.nanoTime();

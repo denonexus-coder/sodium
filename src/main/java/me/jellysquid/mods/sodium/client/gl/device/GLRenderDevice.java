@@ -376,12 +376,13 @@ public class GLRenderDevice implements RenderDevice {
 
     private float computeCameraDeltaRot() {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.getCamera() == null) {
+        if (client == null || client.gameRenderer == null || client.gameRenderer.getCamera() == null) {
             return 0.0f;
         }
 
-        float currentYaw = client.getCamera().getYaw();
-        float currentPitch = client.getCamera().getPitch();
+        var camera = client.gameRenderer.getCamera();
+        float currentYaw = camera.getYaw();
+        float currentPitch = camera.getPitch();
 
         float deltaRot = 0.0f;
         if (cameraInitialized) {
@@ -405,7 +406,8 @@ public class GLRenderDevice implements RenderDevice {
     }
 
     /** Define o ordinal do RenderLayer atual (chamado pelo RenderSectionManager). */
-    void setCurrentRenderLayer(int ordinal) {
+    @Override
+    public void setCurrentRenderLayer(int ordinal) {
         this.currentRenderLayerOrdinal = ordinal;
     }
 
