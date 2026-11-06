@@ -42,6 +42,7 @@ public final class AIMemoryEngineV3 {
 
     public static volatile boolean AUTO_CLEAN_ENABLED  = true;
     public static volatile boolean POOLING_ENABLED     = true;
+    public static volatile boolean ENGINE_ENABLED      = true;
 
     // --- Greedy Meshing (fusão com Sodium) ---
     public static volatile boolean GREEDY_MESHING_ENABLED   = true;
