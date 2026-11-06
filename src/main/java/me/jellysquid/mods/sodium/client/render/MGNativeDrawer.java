@@ -1,5 +1,6 @@
 package me.jellysquid.mods.sodium.client.render;
 
+import me.jellysquid.mods.sodium.client.render.chunk.ChunkType;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -13,7 +14,8 @@ public class MGNativeDrawer {
             int vao, int vertexBuffer, int indexBuffer, int indexType,
             long pCounts, long pIndices, long pBaseVertices,
             int drawCount,
-            float serverTickMs, boolean gcImminent, float cameraDeltaRot);
+            float serverTickMs, boolean gcImminent, float cameraDeltaRot,
+            int chunkTypeId); // Tipo do chunk para seleção adaptativa de desenho
 
     static synchronized void load() {
         if (checked) return;

@@ -7,10 +7,13 @@ import me.jellysquid.mods.sodium.client.gl.state.GlStateTracker;
 import me.jellysquid.mods.sodium.client.gl.sync.GlFence;
 import me.jellysquid.mods.sodium.client.gl.tessellation.*;
 import me.jellysquid.mods.sodium.client.gl.util.EnumBitField;
-import net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils;
-import net.minecraft.client.render.BufferRenderer;
-import org.lwjgl.opengl.*;
 import me.jellysquid.mods.sodium.client.render.MGNativeDrawer;
+import me.jellysquid.mods.sodium.client.render.chunk.ChunkType;
+import net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.BufferRenderer;
+import net.minecraft.client.render.RenderLayer;
+import org.lwjgl.opengl.*;
 
 import java.nio.ByteBuffer;
 
@@ -23,6 +26,13 @@ public class GLRenderDevice implements RenderDevice {
 
     private boolean isActive;
     private GlTessellation activeTessellation;
+
+    // Camera tracking for AFK detection and delta rotation
+    private float lastCameraYaw = 0.0f;
+    private float lastCameraPitch = 0.0f;
+    private boolean cameraInitialized = false;
+
+    private float lastServerTickMs = 0.0f;
 
     @Override
     public CommandList createCommandList() {
@@ -300,6 +310,12 @@ public class GLRenderDevice implements RenderDevice {
                 int vertexBuffer = tess.getBufferForTarget(GlBufferTarget.ARRAY_BUFFER).handle();
                 int indexBuffer  = tess.getBufferForTarget(GlBufferTarget.ELEMENT_BUFFER).handle();
 
+                // Telemetria real para o seletor de método de desenho do MobileGlues
+                float serverTickMs = getServerTickMs();
+                boolean gcImminent = isGCImminent();
+                float cameraDeltaRot = computeCameraDeltaRot();
+                int chunkTypeId = ChunkType.fromRenderLayer(getRenderLayerOrdinal()).id;
+
                 MGNativeDrawer.drawBatchZeroCopy(
                         vao,
                         vertexBuffer,
@@ -309,7 +325,8 @@ public class GLRenderDevice implements RenderDevice {
                         batch.pElementPointer,
                         batch.pBaseVertex,
                         batch.size(),
-                        0.0f, false, 0.0f);
+                        serverTickMs, gcImminent, cameraDeltaRot,
+                        chunkTypeId);
                 return;
             }
 
@@ -334,4 +351,61 @@ public class GLRenderDevice implements RenderDevice {
             }
         }
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // Telemetria para o seletor de método de desenho do MobileGlues
+    // ────────────────────────────────────────────────────────────────
+
+    private float getServerTickMs() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client != null && client.getServer() != null) {
+            return (float) client.getServer().getTicks();
+        }
+        return 0.0f;
+    }
+
+    private boolean isGCImminent() {
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long freeMemory = runtime.freeMemory();
+        if (maxMemory <= 0) return false;
+        return (double) freeMemory / (double) maxMemory < 0.20;
+    }
+
+    private float computeCameraDeltaRot() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getCamera() == null) {
+            return 0.0f;
+        }
+
+        float currentYaw = client.getCamera().getYaw();
+        float currentPitch = client.getCamera().getPitch();
+
+        float deltaRot = 0.0f;
+        if (cameraInitialized) {
+            float yawDelta = currentYaw - lastCameraYaw;
+            float pitchDelta = currentPitch - lastCameraPitch;
+            // Normalize yaw delta to [-180, 180]
+            while (yawDelta > 180.0f) yawDelta -= 360.0f;
+            while (yawDelta < -180.0f) yawDelta += 360.0f;
+            deltaRot = (float) Math.sqrt(yawDelta * yawDelta + pitchDelta * pitchDelta);
+        }
+
+        lastCameraYaw = currentYaw;
+        lastCameraPitch = currentPitch;
+        cameraInitialized = true;
+
+        return deltaRot;
+    }
+
+    private int getRenderLayerOrdinal() {
+        return currentRenderLayerOrdinal;
+    }
+
+    /** Define o ordinal do RenderLayer atual (chamado pelo RenderSectionManager). */
+    void setCurrentRenderLayer(int ordinal) {
+        this.currentRenderLayerOrdinal = ordinal;
+    }
+
+    private int currentRenderLayerOrdinal = ChunkType.SOLID.id; // Default: SOLID
 }
