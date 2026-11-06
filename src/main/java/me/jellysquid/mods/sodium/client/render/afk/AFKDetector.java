@@ -25,8 +25,8 @@ public final class AFKDetector {
     // Jogador parado por 3 segundos = AFK
     private static final long AFK_THRESHOLD_MS = 3_000L;
 
-    // Bench deve rodar em menos de 10 segundos
-    private static final long BENCH_MAX_DURATION_MS = 10_000L;
+    // Bench deve rodar em menos de 10 segundos (acessível por AFKBenchRunner)
+    static final long BENCH_MAX_DURATION_MS = 10_000L;
 
     // Após o bench, aguardar este tempo antes de permitir outro
     private static final long BENCH_COOLDOWN_MS = 30_000L;
@@ -76,7 +76,8 @@ public final class AFKDetector {
             Math.abs(pitch - lastCameraRot[1]) > 0.01f;
 
         if (moved) {
-            lastMovementNs.set(now);
+            // Captura o valor ANTES de atualizar: é o início do período AFK que acabou.
+            long afkStartNs = lastMovementNs.getAndSet(now);
             lastCameraPos[0] = camX;
             lastCameraPos[1] = camY;
             lastCameraPos[2] = camZ;
@@ -85,8 +86,8 @@ public final class AFKDetector {
 
             if (isAfk.getAndSet(false)) {
                 // Saiu do AFK
-                LOGGER.debug("[AFK] Jogador voltou do AFK após {}", 
-                    (now - lastMovementNs) / 1_000_000.0 + "ms");
+                LOGGER.debug("[AFK] Jogador voltou do AFK após {}ms",
+                    (now - afkStartNs) / 1_000_000.0);
             }
             return false;
         }

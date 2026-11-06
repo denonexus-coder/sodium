@@ -1,13 +1,12 @@
 package me.jellysquid.mods.sodium.client.render.chunk.greedy;
 
 import me.jellysquid.mods.sodium.client.render.chunk.compile.buffers.BakedChunkModelBuilder;
-import me.jellysquid.mods.sodium.client.render.chunk.compile.buffers.ChunkModelBuilder;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.builder.ChunkMeshBufferBuilder;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexEncoder;
 import net.minecraft.client.render.model.BakedQuad;
 import net.minecraft.client.texture.Sprite;
+import net.minecraft.block.BlockState;
 import net.minecraft.util.math.Direction;
-import net.minecraft.world.level.block.state.BlockState;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
@@ -53,10 +52,8 @@ public final class GreedyMeshRenderer {
             me.jellysquid.mods.sodium.client.render.chunk.terrain.material.Material material =
                     me.jellysquid.mods.sodium.client.render.chunk.terrain.material.DefaultMaterials.forBlockState(state);
 
-            ChunkModelBuilder modelBuilder = builder.getVertexBuffer(
-                    me.jellysquid.mods.sodium.client.model.quad.properties.ModelQuadFacing.values()[faceOrd]);
-
-            ChunkMeshBufferBuilder vb = modelBuilder.getVertexBuffer(me.jellysquid.mods.sodium.client.model.quad.properties.ModelQuadFacing.values()[faceOrd]);
+            ChunkMeshBufferBuilder vb = builder.getVertexBuffer(
+                    me.jellysquid.mods.sodium.client.model.quad.properties.ModelQuadFacing.fromDirection(face));
 
             ChunkVertexEncoder.Vertex[] vertices = ChunkVertexEncoder.Vertex.uninitializedQuad();
 

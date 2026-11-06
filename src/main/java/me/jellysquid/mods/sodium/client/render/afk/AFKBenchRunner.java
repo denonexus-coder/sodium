@@ -135,10 +135,8 @@ public final class AFKBenchRunner {
         // Warmup
         for (int w = 0; w < 3; w++) {
             MGNativeDrawer.drawBatchZeroCopy(
-                0, 0, 0, 0x1403, // GL_UNSIGNED_INT
-                counts, 0, // ponteiros simulados (não usados no modo bench)
-                offsets, 0,
-                baseVertices, 0,
+                0, 0, 0, 0x1403, // vao, vbo, ebo, GL_UNSIGNED_INT
+                0L, 0L, 0L, // ponteiros simulados (não usados no modo bench)
                 drawCount,
                 0.0f, false, 0.0f
             );
@@ -150,9 +148,7 @@ public final class AFKBenchRunner {
 
             MGNativeDrawer.drawBatchZeroCopy(
                 0, 0, 0, 0x1403,
-                counts, 0,
-                offsets, 0,
-                baseVertices, 0,
+                0L, 0L, 0L,
                 drawCount,
                 0.0f, false, 0.0f
             );

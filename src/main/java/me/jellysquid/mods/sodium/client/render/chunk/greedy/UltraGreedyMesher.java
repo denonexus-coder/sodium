@@ -1,8 +1,8 @@
 package me.jellysquid.mods.sodium.client.render.chunk.greedy;
 
 import me.jellysquid.mods.sodium.memory.AIMemoryEngineV3;
-import net.minecraft.core.Direction;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.block.BlockState;
+import net.minecraft.util.math.Direction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -304,8 +304,31 @@ public final class UltraGreedyMesher {
         return inv;
     }
 
-    private static int index(int x, int y, int z) {
+    public static int index(int x, int y, int z) {
         return (y << 8) | (z << 4) | x;
+    }
+
+    /* =====================================================================
+     *  FACE MASKS — BitSet[6] reutilizável (zero alloc entre seções)
+     * ===================================================================== */
+    private static final ThreadLocal<BitSet[]> FACE_MASKS_TL = ThreadLocal.withInitial(() -> {
+        BitSet[] masks = new BitSet[6];
+        for (int f = 0; f < 6; f++) {
+            masks[f] = new BitSet(TOTAL_BLOCKS);
+        }
+        return masks;
+    });
+
+    /**
+     * Retorna 6 {@link BitSet} (um por face, índice = {@link Direction#ordinal()})
+     * zerados e prontos para uso. Reutiliza alocação via ThreadLocal.
+     */
+    public static BitSet[] createFaceMaskArray() {
+        BitSet[] masks = FACE_MASKS_TL.get();
+        for (BitSet m : masks) {
+            m.clear();
+        }
+        return masks;
     }
 
     /* =====================================================================

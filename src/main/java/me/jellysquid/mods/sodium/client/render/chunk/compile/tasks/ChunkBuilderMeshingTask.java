@@ -1,7 +1,7 @@
 package me.jellysquid.mods.sodium.client.render.chunk.compile.tasks;
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions;
+import me.jellysquid.mods.sodium.client.SodiumClientMod;
 import me.jellysquid.mods.sodium.client.render.chunk.RenderSection;
 import me.jellysquid.mods.sodium.client.render.chunk.compile.ChunkBuildBuffers;
 import me.jellysquid.mods.sodium.client.render.chunk.compile.ChunkBuildContext;
@@ -39,7 +39,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.terrain.material.DefaultMat
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.material.parameters.AlphaCutoffParameter;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.builder.ChunkMeshBufferBuilder;
 import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexEncoder;
-import net.minecraft.core.Direction;
+import net.minecraft.util.math.Direction;
 
 /**
  * Rebuilds all the meshes of a chunk for each given render pass with non-occluded blocks. The result is then uploaded
@@ -177,7 +177,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
         Map<TerrainRenderPass, BuiltSectionMeshParts> meshes;
 
-        if (SodiumGameOptions.performance.greedyMeshingEnabled) {
+        if (SodiumClientMod.options().performance.greedyMeshingEnabled) {
             meshes = buildGreedyMeshes(buffers, cache, occluder, renderData);
         } else {
             meshes = new Reference2ReferenceOpenHashMap<>();
@@ -251,7 +251,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                     visible = true;
                 } else {
                     BlockState neighbor = blocks[UltraGreedyMesher.index(nx, ny, nz)];
-                    if (neighbor != null && neighbor.isOpaqueFullCube(slice, new net.minecraft.core.BlockPos(
+                    if (neighbor != null && neighbor.isOpaqueFullCube(slice, new net.minecraft.util.math.BlockPos(
                             minX + bx, minY + by, minZ + bz))) {
                         visible = false;
                     }

@@ -1,8 +1,9 @@
 package me.jellysquid.mods.sodium.mixin.asmd;
 
+import me.jellysquid.mods.sodium.client.render.afk.AFKBenchRunner;
 import me.jellysquid.mods.sodium.client.render.afk.AFKDetector;
-import me.jellysquid.mods.sodium.client.render.asmd.ASDMJavaBridge;
-import me.jellysquid.mods.sodium.client.render.asmd.ASDMNativeBridge;
+import me.jellysquid.mods.sodium.client.render.asmd.ASMDJavaBridge;
+import me.jellysquid.mods.sodium.client.render.asmd.ASMDNativeBridge;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -29,24 +30,25 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class RenderLoopMixin {
     @Inject(method = "render(FJZ)V", at = @At("HEAD"))
     private void asmd$onRenderHead(float tickDelta, long startTime, boolean tick, CallbackInfo ci) {
-        ASDMJavaBridge.setFrameClockOriginNs(System.nanoTime());
+        ASMDJavaBridge.setFrameClockOriginNs(System.nanoTime());
 
         // --- Detecção de AFK + bench ultrarrápido (<10s) ---
         // Se o jogador está parado (câmera sem movimento), o C++ precisa
         // recalibrar a tabela de decisão de desenho para manter 60 FPS.
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client != null && client.getCamera() != null) {
-            var pos = client.getCamera().getPos();
-            float yaw = client.getCamera().getYaw();
-            float pitch = client.getCamera().getPitch();
+        if (client != null && client.gameRenderer != null && client.gameRenderer.getCamera() != null) {
+            var camera = client.gameRenderer.getCamera();
+            var pos = camera.getPos();
+            float yaw = camera.getYaw();
+            float pitch = camera.getPitch();
             if (AFKDetector.update((float) pos.x, (float) pos.y, (float) pos.z, yaw, pitch)) {
                 // Jogador entrou em AFK — disparar bench em background
                 AFKBenchRunner.runBench();
             }
         }
 
-        if (ASDMNativeBridge.isSupported()) {
-            ASDMNativeBridge.notifyFrameStart();
+        if (ASMDNativeBridge.isSupported()) {
+            ASMDNativeBridge.notifyFrameStart();
         }
     }
 }
