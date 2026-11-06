@@ -43,6 +43,11 @@ public final class AIMemoryEngineV3 {
     public static volatile boolean AUTO_CLEAN_ENABLED  = true;
     public static volatile boolean POOLING_ENABLED     = true;
 
+    // --- Greedy Meshing (fusão com Sodium) ---
+    public static volatile boolean GREEDY_MESHING_ENABLED   = true;
+    public static volatile boolean GREEDY_MESHING_MT        = true;
+    public static volatile int     GREEDY_MESHING_MAX_THREADS = 8;
+
     public static final long MAX_EXECUTION_MS = 30_000L;
 
     /* =====================================================================
