@@ -427,6 +427,35 @@ public class SodiumGameOptionPages {
                 )
                 .build());
 
+        // Greedy Meshing (fusão com AI Memory Engine V3)
+        groups.add(OptionGroup.createBuilder()
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Greedy Meshing"))
+                        .setTooltip(Text.literal("Mescla faces coplanares idênticas em quads maiores, reduzindo o número de vértices enviados para a GPU e a pressão de heap.\n\nO que afeta: número de vértices por chunk desenhado, tempo de construção de chunks e alocação de memória. Sem mudança visual aparente (cull de faces continua ativo)."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.HIGH)
+                        .setBinding((opts, value) -> opts.performance.greedyMeshingEnabled = value, opts -> opts.performance.greedyMeshingEnabled)
+                        .setFlags(OptionFlag.REQUIRES_RENDERER_RELOAD)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(boolean.class, sodiumOpts)
+                        .setName(Text.literal("Greedy Meshing Multi-Thread"))
+                        .setTooltip(Text.literal("Processa múltiplas seções de chunk em paralelo usando threads dedicadas durante a mesagem guloseima.\n\nO que afeta: uso de CPU durante a construção de chunks. Desligue se notar instabilidade em dispositivos com poucos núcleos."))
+                        .setControl(TickBoxControl::new)
+                        .setImpact(OptionImpact.MEDIUM)
+                        .setBinding((opts, value) -> opts.performance.greedyMeshingMultiThread = value, opts -> opts.performance.greedyMeshingMultiThread)
+                        .build()
+                )
+                .add(OptionImpl.createBuilder(int.class, sodiumOpts)
+                        .setName(Text.literal("Máx. Threads Greedy Meshing"))
+                        .setTooltip(Text.literal("Número máximo de threads para o greedy meshing (0 = usar todos disponíveis, limitado a 8).\n\nO que afeta: paralelismo na construção de malhas de chunks. Valores muito altos podem saturar a CPU em dispositivos móveis."))
+                        .setControl(o -> new SliderControl(o, 0, 8, 1, ControlValueFormatter.quantityOrDisabled("threads", "Auto")))
+                        .setImpact(OptionImpact.MEDIUM)
+                        .setBinding((opts, value) -> opts.performance.greedyMeshingMaxThreads = value, opts -> opts.performance.greedyMeshingMaxThreads)
+                        .build()
+                )
+                .build());
+
         return new OptionPage(Text.translatable("sodium.options.pages.performance"), ImmutableList.copyOf(groups));
     }
 
