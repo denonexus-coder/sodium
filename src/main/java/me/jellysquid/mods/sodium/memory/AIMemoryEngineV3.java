@@ -1,11 +1,11 @@
 package me.jellysquid.mods.sodium.memory;
 
-import java.lang.management.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
+import me.jellysquid.mods.sodium.client.render.asmd.GCMonitorThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,7 +19,7 @@ import org.slf4j.LoggerFactory;
  *   - Lock-free object pooling (ConcurrentLinkedQueue).
  *   - Double-checked locking cache (TTL/LRU).
  *   - Heartbeat without LockSupport overhead.
- *   - Direct GC tracking via GarbageCollectorMXBean.
+ *   - GC stats via GCMonitorThread (single MXBean poller for the whole mod).
  *   - Specialized chunk cache for Minecraft (64KB typical).
  *   - Predictive preloading based on player position.
  *   - Batch allocation/deallocation.
@@ -81,11 +81,7 @@ public final class AIMemoryEngineV3 {
 
     private static final DoubleAdder MAX_PRESSURE = new DoubleAdder();
 
-    private static final List<GarbageCollectorMXBean> GC_BEANS =
-        Collections.unmodifiableList(ManagementFactory.getGarbageCollectorMXBeans());
     private static final AtomicLong GC_PAUSE_MAX_NS = new AtomicLong(0L);
-    private static final AtomicLong GC_COLLECTIONS    = new AtomicLong(0L);
-    private static final AtomicLong GC_TIME_MS        = new AtomicLong(0L);
 
     private static final AtomicLong HEARTBEAT_MAX_DELAY_NS = new AtomicLong(0L);
 
@@ -392,19 +388,11 @@ public final class AIMemoryEngineV3 {
     }
 
     /* =====================================================================
-     *  ESTATÍSTICAS GC (leitura direta)
+     *  ESTATÍSTICAS GC — sem poll próprio: lê o snapshot que o
+     *  GCMonitorThread já coleta a cada 250ms (fonte única de GC do mod).
      * ===================================================================== */
-    public static long gcCollections() {
-        long count = 0;
-        for (GarbageCollectorMXBean gc : GC_BEANS) count += gc.getCollectionCount();
-        return count;
-    }
-
-    public static long gcTimeMs() {
-        long time = 0;
-        for (GarbageCollectorMXBean gc : GC_BEANS) time += gc.getCollectionTime();
-        return time;
-    }
+    public static long gcCollections() { return GCMonitorThread.gcCollections(); }
+    public static long gcTimeMs()      { return GCMonitorThread.gcTimeMs(); }
 
     public static long gcPauseMaxMs() { return GC_PAUSE_MAX_NS.get() / 1_000_000L; }
 
