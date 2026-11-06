@@ -78,6 +78,14 @@ public class ChunkMeshBufferBuilder {
         return this.vertexCount == 0;
     }
 
+    /**
+     * Zera o contador de vértices sem realocar o buffer.
+     * Usado pelo Greedy Meshing para sobrescrever os dados do pipeline padrão.
+     */
+    public void reset() {
+        this.vertexCount = 0;
+    }
+
     public ByteBuffer slice() {
         if (this.isEmpty()) {
             throw new IllegalStateException("No vertex data in buffer");

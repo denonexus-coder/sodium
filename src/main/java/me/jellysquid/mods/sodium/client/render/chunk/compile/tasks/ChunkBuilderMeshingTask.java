@@ -1,6 +1,7 @@
 package me.jellysquid.mods.sodium.client.render.chunk.compile.tasks;
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
+import me.jellysquid.mods.sodium.client.gui.SodiumGameOptions;
 import me.jellysquid.mods.sodium.client.render.chunk.RenderSection;
 import me.jellysquid.mods.sodium.client.render.chunk.compile.ChunkBuildBuffers;
 import me.jellysquid.mods.sodium.client.render.chunk.compile.ChunkBuildContext;
@@ -32,6 +33,13 @@ import net.minecraft.util.math.BlockPos;
 
 import java.util.BitSet;
 import java.util.Map;
+
+import me.jellysquid.mods.sodium.client.model.quad.properties.ModelQuadFacing;
+import me.jellysquid.mods.sodium.client.render.chunk.terrain.material.DefaultMaterials;
+import me.jellysquid.mods.sodium.client.render.chunk.terrain.material.parameters.AlphaCutoffParameter;
+import me.jellysquid.mods.sodium.client.render.chunk.vertex.builder.ChunkMeshBufferBuilder;
+import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexEncoder;
+import net.minecraft.core.Direction;
 
 /**
  * Rebuilds all the meshes of a chunk for each given render pass with non-occluded blocks. The result is then uploaded
@@ -169,8 +177,8 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
         Map<TerrainRenderPass, BuiltSectionMeshParts> meshes;
 
-        if (AIMemoryEngineV3.GREEDY_MESHING_ENABLED) {
-            meshes = buildGreedyMeshes(buffers, occluder, renderData);
+        if (SodiumGameOptions.performance.greedyMeshingEnabled) {
+            meshes = buildGreedyMeshes(buffers, cache, occluder, renderData);
         } else {
             meshes = new Reference2ReferenceOpenHashMap<>();
 
@@ -198,24 +206,188 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
      * ===================================================================== */
     private Map<TerrainRenderPass, BuiltSectionMeshParts> buildGreedyMeshes(
             ChunkBuildBuffers buffers,
+            BlockRenderCache cache,
             ChunkOcclusionDataBuilder occluder,
             BuiltSectionInfo.Builder renderData) {
 
-        WorldSlice slice = null;
-        try {
-            // Recupera o WorldSlice do cache do contexto (não está acessível diretamente aqui,
-            // então reconstruímos a partir dos dados já carregados no buffers)
-            // Nota: o ChunkBuildBuffers já contém os builders por passe de renderização.
-            // Usamos o UltraGreedyMesher apenas para gerar a geometria otimizada,
-            // depois convertemos para BuiltSectionMeshParts.
+        WorldSlice slice = cache.getWorldSlice();
 
-            // Para não quebrar a pipeline existente, delegamos para o método padrão
-            // do Sodium quando o Greedy Meshing está em modo de compatibilidade.
-            // O UltraGreedyMesher será usado via Mixin em outra camada se necessário.
-            return buildStandardMeshes(buffers, renderData);
-        } catch (Exception ex) {
+        int minX = this.render.getOriginX();
+        int minY = this.render.getOriginY();
+        int minZ = this.render.getOriginZ();
+
+        // Índice da seção local dentro do WorldSlice (3x3x3 seções)
+        int relX = minX - slice.getOriginX();
+        int relY = minY - slice.getOriginY();
+        int relZ = minZ - slice.getOriginZ();
+        int sectionIndex = WorldSlice.getLocalSectionIndex(relX >> 4, relY >> 4, relZ >> 4);
+
+        BlockState[] blocks = slice.getBlockArrayForSection(sectionIndex);
+
+        if (blocks == null) {
             return buildStandardMeshes(buffers, renderData);
         }
+
+        // Calcula faceMasks: face visível se o vizinho não é opaco ou é ar
+        BitSet[] faceMasks = UltraGreedyMesher.createFaceMaskArray();
+        for (int i = 0; i < UltraGreedyMesher.TOTAL_BLOCKS; i++) {
+            BlockState state = blocks[i];
+            if (state == null || state.isAir()) continue;
+
+            int bx = i & 0xF;
+            int by = (i >> 8) & 0xF;
+            int bz = (i >> 4) & 0xF;
+
+            // Para cada face, verifica se o vizinho bloqueia a visibilidade
+            for (int f = 0; f < 6; f++) {
+                Direction dir = Direction.values()[f];
+                int nx = bx + dir.getOffsetX();
+                int ny = by + dir.getOffsetY();
+                int nz = bz + dir.getOffsetZ();
+
+                boolean visible = true;
+                if (nx < 0 || nx >= 16 || ny < 0 || ny >= 16 || nz < 0 || nz >= 16) {
+                    // Fora da seção — considera vizinho como ar (visível)
+                    visible = true;
+                } else {
+                    BlockState neighbor = blocks[UltraGreedyMesher.index(nx, ny, nz)];
+                    if (neighbor != null && neighbor.isOpaqueFullCube(slice, new net.minecraft.core.BlockPos(
+                            minX + bx, minY + by, minZ + bz))) {
+                        visible = false;
+                    }
+                }
+
+                if (visible) {
+                    faceMasks[f].set(i);
+                }
+            }
+        }
+
+        // Calcula mergeKeys: mesmo blockState = pode mesclar
+        long[][] mergeKeys = new long[6][UltraGreedyMesher.TOTAL_BLOCKS];
+        for (int i = 0; i < UltraGreedyMesher.TOTAL_BLOCKS; i++) {
+            BlockState state = blocks[i];
+            if (state == null || state.isAir()) continue;
+            long key = System.identityHashCode(state);
+            for (int f = 0; f < 6; f++) {
+                mergeKeys[f][i] = key;
+            }
+        }
+
+        // Executa o greedy mesher
+        UltraGreedyMesher.QuadBuffer quadBuffer = UltraGreedyMesher.acquireQuadBuffer();
+        UltraGreedyMesher.meshUltra(blocks, faceMasks, mergeKeys, quadBuffer);
+
+        // Converte o QuadBuffer para BuiltSectionMeshParts
+        Map<TerrainRenderPass, BuiltSectionMeshParts> meshes = new Reference2ReferenceOpenHashMap<>();
+
+        // Agrupa quads por passe de renderização (baseado no material do bloco)
+        // Para simplificar, coloca todos no passe SOLID
+        TerrainRenderPass solidPass = DefaultTerrainRenderPasses.SOLID;
+
+        // Prepara os builders para o passe SOLID
+        var builder = buffers.get(new me.jellysquid.mods.sodium.client.render.chunk.terrain.material.Material(
+                solidPass, me.jellysquid.mods.sodium.client.render.chunk.terrain.material.parameters.AlphaCutoffParameter.ZERO, true));
+
+        // Como não temos acesso direto ao BakedChunkModelBuilder, usamos reflexão
+        // para acessar os vertexBuffers internos. Se falhar, cai de volta para o padrão.
+        try {
+            java.lang.reflect.Field vbField = me.jellysquid.mods.sodium.client.render.chunk.compile.buffers.BakedChunkModelBuilder.class
+                    .getDeclaredField("vertexBuffers");
+            vbField.setAccessible(true);
+            ChunkMeshBufferBuilder[] vertexBuffers = (ChunkMeshBufferBuilder[]) vbField.get(builder);
+
+            // Zera os buffers para evitar geometria duplicada com o pipeline padrão
+            for (var vb : vertexBuffers) {
+                vb.reset();
+            }
+
+            for (int i = 0; i < quadBuffer.size; i++) {
+                int faceOrd = quadBuffer.face[i];
+                int x = quadBuffer.x[i];
+                int y = quadBuffer.y[i];
+                int z = quadBuffer.z[i];
+                int w = quadBuffer.w[i];
+                int h = quadBuffer.h[i];
+                int stateIdx = quadBuffer.stateIdx[i];
+
+                BlockState state = blocks[stateIdx];
+                Direction face = Direction.values()[faceOrd];
+                ModelQuadFacing mqf = ModelQuadFacing.fromDirection(face);
+
+                ChunkMeshBufferBuilder vb = vertexBuffers[mqf.ordinal()];
+
+                ChunkVertexEncoder.Vertex[] vertices = ChunkVertexEncoder.Vertex.uninitializedQuad();
+
+                float fx = x;
+                float fy = y;
+                float fz = z;
+
+                switch (face) {
+                    case DOWN:
+                        vertices[0].x = fx; vertices[0].y = fy; vertices[0].z = fz;
+                        vertices[1].x = fx + w; vertices[1].y = fy; vertices[1].z = fz;
+                        vertices[2].x = fx + w; vertices[2].y = fy; vertices[2].z = fz + h;
+                        vertices[3].x = fx; vertices[3].y = fy; vertices[3].z = fz + h;
+                        break;
+                    case UP:
+                        vertices[0].x = fx; vertices[0].y = fy + 1; vertices[0].z = fz;
+                        vertices[1].x = fx + w; vertices[1].y = fy + 1; vertices[1].z = fz;
+                        vertices[2].x = fx + w; vertices[2].y = fy + 1; vertices[2].z = fz + h;
+                        vertices[3].x = fx; vertices[3].y = fy + 1; vertices[3].z = fz + h;
+                        break;
+                    case NORTH:
+                        vertices[0].x = fx; vertices[0].y = fy; vertices[0].z = fz;
+                        vertices[1].x = fx; vertices[1].y = fy + h; vertices[1].z = fz;
+                        vertices[2].x = fx; vertices[2].y = fy + h; vertices[2].z = fz + 1;
+                        vertices[3].x = fx; vertices[3].y = fy; vertices[3].z = fz + 1;
+                        break;
+                    case SOUTH:
+                        vertices[0].x = fx; vertices[0].y = fy; vertices[0].z = fz + 1;
+                        vertices[1].x = fx; vertices[1].y = fy + h; vertices[1].z = fz + 1;
+                        vertices[2].x = fx; vertices[2].y = fy + h; vertices[2].z = fz;
+                        vertices[3].x = fx; vertices[3].y = fy; vertices[3].z = fz;
+                        break;
+                    case WEST:
+                        vertices[0].x = fx; vertices[0].y = fy; vertices[0].z = fz;
+                        vertices[1].x = fx; vertices[1].y = fy + h; vertices[1].z = fz;
+                        vertices[2].x = fx; vertices[2].y = fy + h; vertices[2].z = fz + w;
+                        vertices[3].x = fx; vertices[3].y = fy; vertices[3].z = fz + w;
+                        break;
+                    case EAST:
+                    default:
+                        vertices[0].x = fx + 1; vertices[0].y = fy; vertices[0].z = fz;
+                        vertices[1].x = fx + 1; vertices[1].y = fy + h; vertices[1].z = fz;
+                        vertices[2].x = fx + 1; vertices[2].y = fy + h; vertices[2].z = fz + w;
+                        vertices[3].x = fx + 1; vertices[3].y = fy; vertices[3].z = fz + w;
+                        break;
+                }
+
+                for (int v = 0; v < 4; v++) {
+                    vertices[v].u = (v % 2 == 0) ? 0.0f : 1.0f;
+                    vertices[v].v = (v < 2) ? 0.0f : 1.0f;
+                    vertices[v].color = 0xFFFFFFFF;
+                    vertices[v].light = 0xFFFFFF;
+                }
+
+                vb.push(vertices, me.jellysquid.mods.sodium.client.render.chunk.terrain.material.DefaultMaterials.forBlockState(state));
+            }
+        } catch (Exception ex) {
+            // Se algo der errado com reflexão, cai de volta para o padrão
+            return buildStandardMeshes(buffers, renderData);
+        }
+
+        // Cria as malhas finais para cada passe
+        for (TerrainRenderPass pass : DefaultTerrainRenderPasses.ALL) {
+            BuiltSectionMeshParts mesh = buffers.createMesh(pass);
+
+            if (mesh != null) {
+                meshes.put(pass, mesh);
+                renderData.addRenderPass(pass);
+            }
+        }
+
+        return meshes;
     }
 
     private Map<TerrainRenderPass, BuiltSectionMeshParts> buildStandardMeshes(

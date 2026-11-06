@@ -72,6 +72,15 @@ public class SodiumGameOptions {
         // Multi-Region Coalescing (09b606df + 48fb039d do dev)
         /** Duas fases (fill CPU -> dispatch GPU) para não forçar flushes prematuros em TBDR. */
         public boolean useMultiRegionCoalescing = true;
+
+        // Greedy Meshing (fusão com AI Memory Engine V3)
+        /** Mescla faces coplanares idênticas em quads maiores (estilo Greedy Meshing Mod),
+         *  reduzindo o número de vértices enviados para a GPU e a pressão de heap. */
+        public boolean greedyMeshingEnabled = false;
+        /** Processa múltiplas seções de chunk em paralelo usando threads dedicadas. */
+        public boolean greedyMeshingMultiThread = true;
+        /** Número máximo de threads para o greedy meshing (0 = usar todos disponíveis, até 8). */
+        public int greedyMeshingMaxThreads = 8;
     }
 
     public static class AdvancedSettings {

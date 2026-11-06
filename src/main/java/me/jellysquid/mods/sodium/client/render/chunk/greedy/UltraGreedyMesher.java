@@ -245,20 +245,6 @@ public final class UltraGreedyMesher {
     }
 
     /* =====================================================================
-     *  BACKWARD COMPAT — QuadBuffer → List<GreedyQuad> (estilo Minecraft)
-     * ===================================================================== */
-    public static void toQuadList(
-            QuadBuffer buffer,
-            BlockState[] states,
-            java.util.List<net.minecraft.client.render.model.BakedQuad> out) {
-
-        for (int i = 0; i < buffer.size; i++) {
-            // Cria BakedQuad simplificado — pode ser expandido conforme necessário
-            // Aqui registramos apenas a contagem para stats
-        }
-    }
-
-    /* =====================================================================
      *  THREAD-LOCAL QUAD BUFFER
      * ===================================================================== */
     public static QuadBuffer acquireQuadBuffer() {

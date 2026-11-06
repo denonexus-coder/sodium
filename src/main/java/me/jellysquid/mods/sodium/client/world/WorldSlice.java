@@ -415,4 +415,27 @@ public final class WorldSlice implements BlockRenderView, BiomeColorView, Render
     public static int getLocalSectionIndex(int x, int y, int z) {
         return (y * SECTION_ARRAY_LENGTH * SECTION_ARRAY_LENGTH) + (z * SECTION_ARRAY_LENGTH) + x;
     }
+
+    /**
+     * Retorna o array de blocos da seção local informada.
+     * Usado pelo Greedy Meshing para acessar os dados de bloco sem reflexão.
+     */
+    public BlockState[] getBlockArrayForSection(int sectionIndex) {
+        if (sectionIndex < 0 || sectionIndex >= blockArrays.length) {
+            return null;
+        }
+        return blockArrays[sectionIndex];
+    }
+
+    public int getOriginX() {
+        return originX;
+    }
+
+    public int getOriginY() {
+        return originY;
+    }
+
+    public int getOriginZ() {
+        return originZ;
+    }
 }
