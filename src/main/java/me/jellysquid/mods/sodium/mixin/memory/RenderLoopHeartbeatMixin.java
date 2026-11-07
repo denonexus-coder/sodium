@@ -22,24 +22,17 @@ public abstract class RenderLoopHeartbeatMixin {
             // Roda um ciclo de monitorização a cada N frames (não a cada frame)
             // para não sobrecarregar a thread principal.
             if (ci != null) {
-                // Usamos um contador estático simples para throttling
-                RenderLoopThrottle.tick();
+                // Throttling inline (a classe helper RenderLoopThrottle ficaria
+                // dentro do pacote de mixins e é rejeitada pelo Mixin:
+                // "in a defined mixin package ... cannot be referenced directly").
+                counter++;
+                if (counter >= 60) { // ~1 vez por segundo a 60 FPS
+                    counter = 0;
+                    AIMemoryEngineV3.monitorCycle();
+                }
             }
         }
     }
-}
 
-/**
- * Throttle para não rodar monitorCycle() a cada frame.
- */
-final class RenderLoopThrottle {
     private static int counter = 0;
-
-    static void tick() {
-        counter++;
-        if (counter >= 60) { // ~1 vez por segundo a 60 FPS
-            counter = 0;
-            AIMemoryEngineV3.monitorCycle();
-        }
-    }
 }
